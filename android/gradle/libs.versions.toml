@@ -1,0 +1,35 @@
+# 版本唯一来源。所有版本于 2026-11-12 从 Google Maven / Maven Central /
+# services.gradle.org / GitHub releases 核实；本机无 JDK/SDK，未做实际解析。
+[versions]
+agp = "8.13.2"
+kotlin = "2.1.21"
+ksp = "2.1.21-2.0.2"
+gradleWrapper = "8.14.7"
+coreKtx = "1.19.1"
+activityKtx = "1.13.0"
+recyclerview = "1.4.0"
+coroutines = "1.10.2"
+room = "2.7.2"
+blessed = "2.5.3"
+nordicScanner = "1.6.0"
+junit = "4.13.2"
+# Vico 3.3.1 仍为基线首选图表库；M0 通过前不引入其 API，图表用自绘 Canvas，
+# 避免在无编译环境下写入无法验证的第三方调用。切换评估见 V1开发基线 5.1 节。
+vico = "3.3.1"
+
+[libraries]
+androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
+androidx-activity-ktx = { group = "androidx.activity", name = "activity-ktx", version.ref = "activityKtx" }
+androidx-recyclerview = { group = "androidx.recyclerview", name = "recyclerview", version.ref = "recyclerview" }
+kotlinx-coroutines-android = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-android", version.ref = "coroutines" }
+androidx-room-runtime = { group = "androidx.room", name = "room-runtime", version.ref = "room" }
+androidx-room-ktx = { group = "androidx.room", name = "room-ktx", version.ref = "room" }
+androidx-room-compiler = { group = "androidx.room", name = "room-compiler", version.ref = "room" }
+blessed-android = { group = "com.github.weliem", name = "blessed-android", version.ref = "blessed" }
+nordic-scanner-compat = { group = "no.nordicsemi.android.support.v18", name = "scanner", version.ref = "nordicScanner" }
+junit = { group = "junit", name = "junit", version.ref = "junit" }
+
+[plugins]
+android-application = { id = "com.android.application", version.ref = "agp" }
+kotlin-android = { id = "org.jetbrains.kotlin.android", version.ref = "kotlin" }
+ksp = { id = "com.google.devtools.ksp", version.ref = "ksp" }

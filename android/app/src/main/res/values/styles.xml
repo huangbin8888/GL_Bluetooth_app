@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 使用平台 Material 主题，不引入 AppCompat / Material Components 依赖 -->
+    <style name="AppTheme" parent="android:style/Theme.Material.Light.NoActionBar">
+        <item name="android:colorAccent">#1668E3</item>
+        <item name="android:colorPrimary">#1668E3</item>
+        <item name="android:fontFamily">sans</item>
+        <item name="android:windowBackground">#F3F5F9</item>
+    </style>
+</resources>
