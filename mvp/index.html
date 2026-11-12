@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>蓝牙卡尺测量数据助手 · 可运行 MVP v1.0</title>
+<title>蓝牙卡尺测量数据助手 · 可运行 MVP v1.1</title>
 <style>
 :root{
   --bg:#F3F5F9; --card:#FFFFFF; --line:#E2E7F0; --text:#16202F; --sub:#6B778C;
@@ -252,9 +252,9 @@ button{cursor:pointer}
 <div class="layout">
   <aside class="sidebar panel">
     <div class="side-title">页面导航 · P1–P7</div>
-    <button class="nav-item" data-action="go" data-page="P1"><b>P1 连接卡尺</b><small>扫描 / 权限 / 10 通道槽位</small></button>
+    <button class="nav-item" data-action="go" data-page="P1"><b>P1 连接卡尺</b><small>扫描 / 权限 / 7 通道槽位</small></button>
     <button class="nav-item active" data-action="go" data-page="P2"><b>P2 实时检测 · 记录</b><small>合并页 · 时间+数值两列表格</small></button>
-    <button class="nav-item" data-action="go" data-page="P3"><b>P3 多通道</b><small>新增 · 10 路读数与显示方案</small></button>
+    <button class="nav-item" data-action="go" data-page="P3"><b>P3 多通道</b><small>新增 · 7 路读数与显示方案</small></button>
     <button class="nav-item" data-action="go" data-page="P4"><b>P4 表格模板</b><small>CSV 模板 / 字段映射</small></button>
     <button class="nav-item" data-action="go" data-page="P5"><b>P5 数据分析</b><small>折线图 / 柱状图 / 通道筛选</small></button>
     <button class="nav-item" data-action="go" data-page="P6"><b>P6 导出到本地</b><small>PNG + CSV / 按通道分文件</small></button>
@@ -264,7 +264,7 @@ button{cursor:pointer}
       <strong>这是界面原型，不是 App 源码。</strong><br>
       对照 <strong>README.md ④ 页面文字原型</strong> 与 <strong>V1开发基线.md 第 5 节</strong> 的 12 项必补约束绘制。<br><br>
       <strong>这是可运行 MVP，不是静态原型。</strong>界面框架（三栏工作台、手机外壳、P1–P7、7 屏总览、底部 tab、演示控制、右侧对照）<strong>逐字沿用你已认可的 demo</strong>，只把数据层换成真实实现。<br><br>
-      <strong>MVP 新增能力</strong>：① Web Bluetooth 真连 <span class="mono">GL-BLE#</span> 卡尺，解析 <span class="mono">DAT0/DAT1</span>、拆包粘包、inch→mm、完整帧回 <span class="mono">DAT0:OK</span>、<span class="mono">MEAS/CLR/MOD</span> 指令；② 10 通道独立订阅 / 去抖 / 落库，跨通道不去重；③ IndexedDB 本地库，收到即落库、刷新不丢；④ 真实 CSV 导入导出（BOM / 中文别名 / CHANNEL 列）与图表 PNG 导出；⑤ 诊断日志、屏幕常亮、断连保护。<br><br>
+      <strong>MVP 新增能力</strong>：① Web Bluetooth 真连 <span class="mono">GL-BLE#</span> 卡尺，解析 <span class="mono">DAT0/DAT1</span>、拆包粘包、inch→mm、完整帧回 <span class="mono">DAT0:OK</span>、<span class="mono">MEAS/CLR/MOD</span> 指令；② 7 通道独立订阅 / 去抖 / 落库，跨通道不去重；③ IndexedDB 本地库，收到即落库、刷新不丢；④ 真实 CSV 导入导出（BOM / 中文别名 / CHANNEL 列）与图表 PNG 导出；⑤ 诊断日志、屏幕常亮、断连保护。<br><br>
       <strong>无卡尺时</strong>自动进入演示模式，注入的原始帧走<strong>同一条解析 → 去抖 → 落库 → 渲染链路</strong>；左下「演示控制」是状态注入器，<strong>不属于业务功能按钮</strong>。
     </div>
   </aside>
@@ -297,28 +297,28 @@ button{cursor:pointer}
           <section class="screen" data-id="P1">
             <div class="card tight">
               <div class="row between">
-                <div class="row"><span class="dot" id="p1dot"></span><b id="p1state">已连接 0 / 10 通道</b></div>
-                <span class="chip blue" id="p1mac">GL-BLE# 前缀 · 上限 10</span>
+                <div class="row"><span class="dot" id="p1dot"></span><b id="p1state">已连接 0 / 7 通道</b></div>
+                <span class="chip blue" id="p1mac">GL-BLE# 前缀 · 上限 7</span>
               </div>
-              <div class="tiny muted" style="margin-top:7px" id="p1sub">上次连接：A4:C1:38:01:87 · 10 路按上次 MAC 自动重连</div>
+              <div class="tiny muted" style="margin-top:7px" id="p1sub">上次连接：A4:C1:38:01:87 · 7 路按上次 MAC 自动重连</div>
             </div>
             <div class="banner info">长按卡尺红色 data 键 3 秒，液晶闪 <b>OK</b> 后开始扫描。<span class="muted">（接口文档）</span><br>
-              <b>最多同时连接 10 台</b>，第 11 台扫描到也不连接并提示通道已满。</div>
+              <b>最多同时连接 7 台</b>，第 8 台扫描到也不连接并提示通道已满。</div>
             <div class="banner warn" id="permBanner">
               蓝牙 / 定位权限未确认，或系统定位总开关关闭时扫描不到设备。
               <button class="btn sm" style="margin-top:8px" data-action="perm">去系统设置</button>
             </div>
-            <div class="section-label">附近设备 · 通道槽位 1–10</div>
+            <div class="section-label">附近设备 · 通道槽位 1–7</div>
             <div class="card" id="deviceList"></div>
             <div class="btn-row">
               <button class="btn primary" data-action="scan" style="flex:2">扫描设备</button>
               <button class="btn danger" data-action="disconnect" style="flex:1">全部断开</button>
             </div>
-            <button class="btn block" style="margin-top:8px" data-action="connect-all">连接全部 10 台</button>
+            <button class="btn block" style="margin-top:8px" data-action="connect-all">连接全部 7 台</button>
             <div class="tiny muted" style="margin-top:10px;line-height:1.7">
               机型适配：连接前先停止扫描；Android 限制 30 秒内最多 5 次扫描；重连后重新发现服务并订阅 notify。<br>
-              10 路 GATT 走串行命令队列；单通道断连不影响其他通道继续采集。<br>
-              <b>注意</b>：Android AOSP 蓝牙栈默认并发上限为 7（<span class="mono">GATT_MAX_PHY_CHANNEL</span>），10 路属机型相关能力；达不到时 App 明确提示「已达该机型上限」，不静默失败，属 M0 必验项。
+              7 路 GATT 走串行命令队列；单通道断连不影响其他通道继续采集。<br>
+              <b>注意</b>：Android AOSP 蓝牙栈默认并发上限为 7（<span class="mono">GATT_MAX_PHY_CHANNEL</span>），7 路属机型相关能力；达不到时 App 明确提示「已达该机型上限」，不静默失败，属 M0 必验项。
             </div>
           </section>
 
@@ -365,7 +365,7 @@ button{cursor:pointer}
                 <div style="text-align:right"><div class="tiny muted">本次已记</div><b style="font-size:18px" id="countVal">10 条</b></div>
               </div>
               <div class="row" style="margin-top:9px;flex-wrap:wrap;gap:6px">
-                <span class="chip ok" id="onlineChip"><span class="dot ok"></span>10 通道在线</span>
+                <span class="chip ok" id="onlineChip"><span class="dot ok"></span>7 通道在线</span>
                 <span class="chip">采集时屏幕常亮</span>
                 <span class="chip">按通道独立去抖 ≤0.01mm / 300ms</span>
               </div>
@@ -385,7 +385,7 @@ button{cursor:pointer}
               <button class="btn" data-action="go" data-page="P7">设置</button>
             </div>
             <div class="btn-row" style="margin-top:8px">
-              <button class="btn" data-action="go" data-page="P3">多通道 10 路</button>
+              <button class="btn" data-action="go" data-page="P3">多通道 7 路</button>
               <button class="btn" data-action="go" data-page="P5">查看图表</button>
             </div>
             <div class="btn-row" style="margin-top:8px">
@@ -399,7 +399,7 @@ button{cursor:pointer}
                 <button class="btn sm" data-action="burst">DAT1 连发</button>
               </div>
               <div class="btn-row" style="margin-top:7px">
-                <button class="btn sm" data-action="ch-burst">10 路并发来帧</button>
+                <button class="btn sm" data-action="ch-burst">7 路并发来帧</button>
                 <button class="btn sm" data-action="ch-drop">CH3 断连</button>
               </div>
               <div class="btn-row" style="margin-top:7px">
@@ -413,39 +413,39 @@ button{cursor:pointer}
           <!-- P3 · 新增：多通道（原 P3 记录内容已并入 P2） -->
           <section class="screen" data-id="P3">
             <div class="banner info">
-              <b>最多 10 通道并发</b>：一台手机同时连接 10 台 <span class="mono">GL-BLE#</span> 卡尺。<br>
+              <b>最多 7 通道并发</b>：一台手机同时连接 7 台 <span class="mono">GL-BLE#</span> 卡尺。<br>
               每路独立 notify 订阅、帧缓冲、去重与落库；<b>跨通道不去重</b>。
             </div>
             <div class="card tight">
               <div class="row between">
                 <div><div class="tiny muted">通道占用</div><b id="chCount" style="font-size:18px">0 / 10 在线</b></div>
-                <span class="chip blue">上限 10 台</span>
+                <span class="chip blue">上限 7 台</span>
               </div>
               <div class="ch-legend" id="chLegend"></div>
             </div>
-            <div class="section-label">实时读数 · 10 通道卡片墙</div>
+            <div class="section-label">实时读数 · 7 通道卡片墙</div>
             <div class="ch-grid" id="channelGrid"></div>
             <div class="card tight" style="margin-top:10px">
-              <div class="card-title">多通道显示方案（避免 10 路数据糊在一起）</div>
+              <div class="card-title">多通道显示方案（避免 7 路数据糊在一起）</div>
               <div class="tiny muted" style="line-height:1.8">
-                ① <b>固定 10 色编码</b>：连接列表 / 实时表格 / 通道卡 / 图表点 / 导出文件全局一致；<br>
+                ① <b>固定 7 色编码</b>：连接列表 / 实时表格 / 通道卡 / 图表点 / 导出文件全局一致；<br>
                 ② <b>实时检测与记录合并一屏</b>，表格只留「时间 + 数值」两列，通道用行内色标区分；<br>
                 ③ 顶部通道 chips 一键筛选单通道，默认全部按时间混排；<br>
-                ④ 10 路读数用<b>卡片墙平铺</b>，不在采集页堆 10 个大数字；<br>
+                ④ 7 路读数用<b>卡片墙平铺</b>，不在采集页堆 7 个大数字；<br>
                 ⑤ 图表可叠加（点按通道着色）或单通道查看；导出可合并或按通道分文件；<br>
                 ⑥ 单通道断连只灰掉该卡并计数，其余 9 路继续采集。
               </div>
             </div>
             <div class="btn-row">
-              <button class="btn" data-action="connect-all">连接全部 10 台</button>
-              <button class="btn" data-action="ch-burst">10 路并发来帧</button>
+              <button class="btn" data-action="connect-all">连接全部 7 台</button>
+              <button class="btn" data-action="ch-burst">7 路并发来帧</button>
             </div>
             <div class="btn-row" style="margin-top:8px">
               <button class="btn" data-action="go" data-page="P2">回实时检测</button>
               <button class="btn" data-action="go" data-page="P5">看叠加图表</button>
             </div>
             <div class="tiny muted" style="margin-top:10px;line-height:1.7">
-              第 11 台设备扫描到也不连接并提示上限；10 路 GATT 命令串行队列，连接前先 stopScan()；
+              第 8 台设备扫描到也不连接并提示上限；7 路 GATT 命令串行队列，连接前先 stopScan()；
               重连后每路各自重新 discoverServices + 订阅 notify。
             </div>
           </section>
@@ -482,7 +482,7 @@ button{cursor:pointer}
             <div class="banner warn hidden" id="mapPreview">
               <b>字段映射预览</b><br>
               识别 15 列 · 中文别名命中 6 列 · 未识别 2 列将跳过并记入导入报告 · 首列已剥离 BOM。<br>
-              <b>多通道补充</b>：导出的 CSV 增加 <span class="mono">CHANNEL</span> 列（CH1–CH10），导入时按该列还原通道归属。
+              <b>多通道补充</b>：导出的 CSV 增加 <span class="mono">CHANNEL</span> 列（CH1–CH7），导入时按该列还原通道归属。
             </div>
             <div class="btn-row">
               <button class="btn primary" style="height:44px;font-size:13px" data-action="upload-template">上传模板</button>
@@ -529,7 +529,7 @@ button{cursor:pointer}
               <div class="card-title">多通道导出范围（新增）</div>
               <div class="check" data-action="export-mode" data-mode="merge">
                 <span class="box on" id="boxMerge">✓</span>
-                <div class="grow"><b style="font-size:13px">合并为一个 CSV</b><div class="tiny muted">含 CHANNEL 通道列，10 路按时间混排</div></div>
+                <div class="grow"><b style="font-size:13px">合并为一个 CSV</b><div class="tiny muted">含 CHANNEL 通道列，7 路按时间混排</div></div>
               </div>
               <div class="check" data-action="export-mode" data-mode="split">
                 <span class="box" id="boxSplit"></span>
@@ -565,16 +565,45 @@ button{cursor:pointer}
             </div>
             <div class="card">
               <div class="card-title">多通道（新增）</div>
-              <div class="field"><div><label>最大并发通道数</label><span class="hint">上限 10 台，第 11 台拒绝连接</span></div><input id="setMaxCh" value="10" readonly></div>
-              <div class="field"><div><label>通道色标</label><span class="hint">CH1–CH10 固定配色，全 App 一致</span></div>
-                <span class="chip blue">固定 10 色</span></div>
+              <div class="field"><div><label>最大并发通道数</label><span class="hint">上限 7 台，第 8 台拒绝连接</span></div><input id="setMaxCh" value="7" readonly></div>
+              <div class="field"><div><label>通道色标</label><span class="hint">CH1–CH7 固定配色，全 App 一致</span></div>
+                <span class="chip blue">固定 7 色</span></div>
               <div class="field"><div><label>通道命名 / 改色</label><span class="hint">V2</span></div><span class="chip">V2</span></div>
             </div>
+            <div class="card">
+              <div class="card-title">蓝牙配置（新增 · 设备端参数）</div>
+              <div class="banner" style="background:#FFF7E6;border:1px solid #F0D6A0;color:#7A4E00">
+                <b>设备端参数，App 不下发。</b> 自动发射时长、蓝牙自动休眠、HID 结束符由卡尺固件持有，需厂商配置指令集或 PC 配置工具设置；本页仅按设备登记，便于 7 把卡尺对账。<br>
+                接口文档只定义 <span class="mono">NAM</span> 改广播名；Android 第三方 App 无法配置卡尺 HID 键盘模式参数。
+              </div>
+              <div class="field"><div><label>目标卡尺</label><span class="hint">按通道 / MAC 绑定，只对这一台生效</span></div>
+                <select id="cfgChannel"><option>CH1</option><option>CH2</option><option>CH3</option><option>CH4</option><option>CH5</option><option>CH6</option><option>CH7</option></select></div>
+              <div class="field"><div><label>修改蓝牙名称</label><span class="hint">NAM:&lt;string&gt; · 保留 GL-BLE# 前缀 · ≤16 字符</span></div>
+                <input id="cfgName" value="GL-BLE#0187" style="max-width:150px"></div>
+              <div class="btn-row" style="margin:4px 0 8px">
+                <button class="btn sm primary" data-action="nam-apply">下发改名（NAM）</button>
+                <button class="btn sm" data-action="nam-read">读取当前名称</button>
+              </div>
+              <div class="field"><div><label>自动发射时长</label><span class="hint">设备端参数 · 仅登记</span></div>
+                <input id="cfgAutoEmit" value="30" style="max-width:70px"> 秒</div>
+              <div class="field"><div><label>蓝牙自动休眠</label><span class="hint">设备端参数 · 仅登记</span></div>
+                <button class="switch" data-action="switch" data-key="devSleep"></button></div>
+              <div class="field"><div><label>休眠时间</label><span class="hint">设备端参数 · 仅登记</span></div>
+                <input id="cfgSleepMin" value="5" style="max-width:70px"> 分钟</div>
+              <div class="field"><div><label>结束符（HID 键盘模式）</label><span class="hint">卡尺侧设置；App 侧用作录入分隔符</span></div>
+                <select id="cfgTerminator"><option value="CR">回车 CR / LF</option><option value="TAB">Tab 制表符</option></select></div>
+              <div class="field"><div><label>HID 键盘录入</label><span class="hint">卡尺以键盘配对后，数值注入这里并落库</span></div>
+                <input id="hidInput" placeholder="接收或粘贴数值…" style="max-width:150px"></div>
+              <div class="btn-row" style="margin-top:4px">
+                <button class="btn sm" data-action="cfg-save">保存登记</button>
+                <button class="btn sm" data-action="hid-sample">注入示例 HID 输入</button>
+              </div>
+            </div>
             <div class="card">
               <div class="card-title">采集行为</div>
               <div class="field"><div><label>采集页屏幕常亮</label><span class="hint">息屏断连会永久丢数</span></div>
                 <button class="switch on" data-action="switch" data-key="screen"></button></div>
-              <div class="field"><div><label>自动重连上次 MAC</label><span class="hint">10 路各自记住上次 MAC</span></div>
+              <div class="field"><div><label>自动重连上次 MAC</label><span class="hint">7 路各自记住上次 MAC</span></div>
                 <button class="switch on" data-action="switch" data-key="reconnect"></button></div>
             </div>
             <div class="card tight">
@@ -590,7 +619,7 @@ button{cursor:pointer}
               <button class="btn" data-action="settings-reset">恢复默认</button>
             </div>
             <div class="tiny muted" style="text-align:center;margin-top:12px">
-              MVP v1.0 · 本地分发 · 升级前请先导出 CSV 备份
+              MVP v1.1 · 本地分发 · 升级前请先导出 CSV 备份
             </div>
           </section>
 
@@ -614,8 +643,8 @@ button{cursor:pointer}
     <div id="noteBody"></div>
     <div class="disc">
       MVP 已在浏览器里跑通协议解析、本地库与导入导出；<b>它不是 Android APK</b>。已确认的技术路线 C（原生 Kotlin + Room + blessed-android + Vico）仍是正式 App 落点，本机无 JDK / Android SDK，无法编译验证，故本版用于先把功能链路与界面跑通。<br>
-      正式 APK 与 M0 实机验证（7 路协议栈上限、10 路机型实测、release 签名）仍待有卡尺与真机后推进；技术基线以 <b>V1开发基线.md</b> 为准。<br>
-      v1.0 只加「真实链路 + 10 通道」，界面框架与既有功能保持不变。
+      正式 APK 与 M0 实机验证（7 路协议栈上限、7 路机型实测、release 签名）仍待有卡尺与真机后推进；技术基线以 <b>V1开发基线.md</b> 为准。<br>
+      v1.1 在 v1.0 基础上把通道回退为 7、新增 P7 蓝牙配置登记与 HID 录入；界面框架与既有功能保持不变。
     </div>
   </aside>
 </div>

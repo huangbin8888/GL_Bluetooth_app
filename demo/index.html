@@ -560,6 +560,35 @@ button{cursor:pointer}
               <div class="field"><div><label>通道命名 / 改色</label><span class="hint">V2</span></div><span class="chip">V2</span></div>
             </div>
             <div class="card">
+              <div class="card-title">蓝牙配置（新增 · 设备端参数）</div>
+              <div class="banner" style="background:#FFF7E6;border:1px solid #F0D6A0;color:#7A4E00">
+                <b>设备端参数，App 不下发。</b> 自动发射时长、蓝牙自动休眠、HID 结束符由卡尺固件持有，需厂商配置指令集或 PC 配置工具设置；本页仅按设备登记，便于 7 把卡尺对账。<br>
+                接口文档只定义 <span class="mono">NAM</span> 改广播名；Android 第三方 App 无法配置卡尺 HID 键盘模式参数。
+              </div>
+              <div class="field"><div><label>目标卡尺</label><span class="hint">按通道 / MAC 绑定，只对这一台生效</span></div>
+                <select id="cfgChannel"><option>CH1</option><option>CH2</option><option>CH3</option><option>CH4</option><option>CH5</option><option>CH6</option><option>CH7</option></select></div>
+              <div class="field"><div><label>修改蓝牙名称</label><span class="hint">NAM:&lt;string&gt; · 保留 GL-BLE# 前缀 · ≤16 字符</span></div>
+                <input id="cfgName" value="GL-BLE#0187" style="max-width:150px"></div>
+              <div class="btn-row" style="margin:4px 0 8px">
+                <button class="btn sm primary" data-action="nam-apply">下发改名（NAM）</button>
+                <button class="btn sm" data-action="nam-read">读取当前名称</button>
+              </div>
+              <div class="field"><div><label>自动发射时长</label><span class="hint">设备端参数 · 仅登记</span></div>
+                <input id="cfgAutoEmit" value="30" style="max-width:70px"> 秒</div>
+              <div class="field"><div><label>蓝牙自动休眠</label><span class="hint">设备端参数 · 仅登记</span></div>
+                <button class="switch" data-action="switch" data-key="devSleep"></button></div>
+              <div class="field"><div><label>休眠时间</label><span class="hint">设备端参数 · 仅登记</span></div>
+                <input id="cfgSleepMin" value="5" style="max-width:70px"> 分钟</div>
+              <div class="field"><div><label>结束符（HID 键盘模式）</label><span class="hint">卡尺侧设置；App 侧用作录入分隔符</span></div>
+                <select id="cfgTerminator"><option value="CR">回车 CR / LF</option><option value="TAB">Tab 制表符</option></select></div>
+              <div class="field"><div><label>HID 键盘录入</label><span class="hint">卡尺以键盘配对后，数值注入这里并落库</span></div>
+                <input id="hidInput" placeholder="接收或粘贴数值…" style="max-width:150px"></div>
+              <div class="btn-row" style="margin-top:4px">
+                <button class="btn sm" data-action="cfg-save">保存登记</button>
+                <button class="btn sm" data-action="hid-sample">注入示例 HID 输入</button>
+              </div>
+            </div>
+            <div class="card">
               <div class="card-title">采集行为</div>
               <div class="field"><div><label>采集页屏幕常亮</label><span class="hint">息屏断连会永久丢数</span></div>
                 <button class="switch on" data-action="switch" data-key="screen"></button></div>
@@ -579,7 +608,7 @@ button{cursor:pointer}
               <button class="btn" data-action="settings-reset">恢复默认</button>
             </div>
             <div class="tiny muted" style="text-align:center;margin-top:12px">
-              v0.2 UI Demo · 本地分发 · 升级前请先导出 CSV 备份
+              v0.3 UI Demo · 本地分发 · 升级前请先导出 CSV 备份
             </div>
           </section>
 
@@ -648,7 +677,7 @@ button{cursor:pointer}
     current:155.15, records:BASE.slice(), channels:defaultChannels(), focusCh:0, activeCh:1,
     dedup:0, lost:0, disconnected:false, chartType:"line", expPng:true, expCsv:true,
     exportSplit:false, lower:154.80, upper:155.20,
-    switches:{screen:true,reconnect:true}, noteIndex:-1
+    switches:{screen:true,reconnect:true,devSleep:false}, noteIndex:-1
   };
   var TITLES = {P1:"连接卡尺",P2:"实时检测 · 记录",P3:"多通道",P4:"表格模板",P5:"数据分析",P6:"导出到本地",P7:"设置"};
   var NOTES = {
@@ -658,7 +687,7 @@ button{cursor:pointer}
     P4:{sub:"README ④-P4 · V1 简版模板",items:[["⑤-13","内置默认模板 + CSV 表头模板上传与字段映射"],["4.2","15 列稳定大写 key + 中文别名；导入先剥离 BOM"],["新增","导出 CSV 增 CHANNEL 列（CH1–CH7），导入按该列还原通道"],["4.1","未识别列整列跳过并记入导入报告"],["V2","xlsx 合并单元格 / 公式 / 样式延后"]]},
     P5:{sub:"README ④-P5 · 图表分析 / 通道叠加",items:[["⑤-15","折线图（按测量序号 / 时间）"],["⑤-16","柱状图（按序号对比 / 数值分布）"],["新增","按通道筛选或 7 路叠加，数据点按通道色着色"],["④-P5","公差上下限虚线参考线、统计卡片"],["P5","点折线点显示该条数值、时间与通道"]]},
     P6:{sub:"README ④-P6 · 导出 / 按通道分文件",items:[["⑤-17","图表导出 PNG 到手机本地"],["⑤-18","原始数据导出 CSV 到手机本地"],["新增","合并一个 CSV（含 CHANNEL 列）或按通道分 7 个 CSV"],["A11","默认同时勾 PNG + CSV；CSV 可再导回 App"],["2.4","走 SAF，不申请 MANAGE_EXTERNAL_STORAGE"],["B6","同名文件不覆盖"]]},
-    P7:{sub:"README ④-P7 · 配置层 / 通道上限",items:[["④-P7","默认单位 / 小数位 / 公差上下限 / 去抖阈值 / 广播名前缀"],["新增","最大并发通道数 7（只读），通道命名 / 改色留 V2"],["A7","导出诊断日志（原始帧、指令、回包、错误码）"],["B2","省电白名单引导；V1 仍只承诺前台"],["B5","App 内显示版本；升级前提醒先导出 CSV"]]}
+    P7:{sub:"README ④-P7 · 配置层 / 通道上限",items:[["④-P7","默认单位 / 小数位 / 公差上下限 / 去抖阈值 / 广播名前缀"],["新增","最大并发通道数 7（只读），通道命名 / 改色留 V2"],["A7","导出诊断日志（原始帧、指令、回包、错误码）"],["B2","省电白名单引导；V1 仍只承诺前台"],["B5","App 内显示版本；升级前提醒先导出 CSV"],["新增","蓝牙配置：NAM 改名可下发；自动发射 / 休眠 / HID 结束符仅登记"],["边界","Android 第三方 App 无法配置卡尺 HID 键盘模式参数；无厂商指令集，V1 不假下发"]]}
   };
   function $(id){return document.getElementById(id);}
   function q(sel,root){return (root||document).querySelector(sel);}
@@ -1026,6 +1055,10 @@ button{cursor:pointer}
     if(a==="switch"){
       var k=el.dataset.key;S.switches[k]=!S.switches[k];el.classList.toggle("on",S.switches[k]);return;
     }
+    if(a==="nam-apply"){toast("演示：下发 NAM:<string> 到选中 CH（真实下发在 MVP）");return;}
+    if(a==="nam-read"){toast("演示：文档查询帧格式有歧义，M0 抓包后实现");return;}
+    if(a==="cfg-save"){toast("演示：仅登记设备端参数，未下发到卡尺");return;}
+    if(a==="hid-sample"){toast("演示：按结束符切分 HID 输入并落库（真实链路在 MVP）");return;}
     if(a==="diag"){toast("诊断日志已导出：7 路原始帧 / 指令 / 回包 / 错误码");return;}
     if(a==="battery"){toast("演示：跳转电池优化白名单");return;}
     if(a==="settings-save"){

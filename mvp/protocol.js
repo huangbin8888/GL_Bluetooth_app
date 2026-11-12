@@ -12,15 +12,15 @@
   var SERVICE_UUID = "0000ffb0-0000-1000-8000-00805f9b34fb";
   var CHAR_UUID = "0000ffb2-0000-1000-8000-00805f9b34fb";
   var NAME_PREFIX = "GL-BLE#";
-  var MAX_CHANNELS = 10;
+  var MAX_CHANNELS = 7;
   var UM_PER_MM = 1000;
   var UM_PER_INCH = 25400; // 1 inch = 25.4 mm
 
-  /* Fixed 10-colour coding. Colour alone is never the only cue: every badge
+  /* Fixed 7-colour coding. Colour alone is never the only cue: every badge
      also carries CHn text and every CSV row carries the CHANNEL column. */
   var CH_COLORS = [
     "#1668E3", "#0F9D58", "#E8912A", "#8E44AD", "#00A6B8",
-    "#E5384A", "#D24AA0", "#795548", "#37474F", "#9E9D24"
+    "#E5384A", "#D24AA0"
   ];
 
   /* 15 base columns from templates/gl_caliper_default.csv + CHANNEL (M0 change) */
@@ -208,7 +208,10 @@
       if (!isFinite(mm)) { badRows++; return; }
       var um = Math.round(mm * UM_PER_MM);
       var ch = parseInt(String(o.CHANNEL || "").replace(/^CH/i, ""), 10);
-      if (!isFinite(ch) || ch < 1 || ch > MAX_CHANNELS) ch = defaults.channel_no || 1;
+      if (!isFinite(ch) || ch < 1) ch = defaults.channel_no || 1;
+      /* v1.1: CH8-CH10 from older exports stay as legacy channels; never clamp
+         to 1 and never drop the row. */
+      var legacy = ch > MAX_CHANNELS;
       var key = (o.DATE || "") + "|" + (o.TIME || "") + "|" + ch + "|" + um;
       if (seen[key]) return;
       seen[key] = 1;
@@ -227,6 +230,7 @@
         device_mac: o.DEVICE_MAC || "",
         note: o.NOTE || "",
         ch: ch,
+        legacy: legacy,
         inch: (o.RAW_UNIT === "i"),
         ts: Date.now()
       });
@@ -262,6 +266,44 @@
     return "\uFEFF" + lines.join("\r\n") + "\r\n";
   }
 
+  /** NAM is the only configuration command the interface document defines. */
+  function validateNam(name) {
+    var s = String(name == null ? "" : name).trim();
+    if (!s) return { ok: false, reason: "名称不能为空" };
+    if (s.length > 16) return { ok: false, reason: "名称最长 16 字符（当前 " + s.length + "）" };
+    if (s.indexOf(NAME_PREFIX) !== 0) return { ok: false, reason: "必须保留 " + NAME_PREFIX + " 前缀" };
+    var suffix = s.slice(NAME_PREFIX.length);
+    if (!suffix) return { ok: false, reason: "前缀后需有自定义名称" };
+    if (!/^[A-Za-z0-9_-]+$/.test(suffix)) return { ok: false, reason: "仅支持字母、数字、下划线与连字符" };
+    return { ok: true, cmd: "NAM:" + s };
+  }
+
+  /**
+   * HID keyboard mode: the caliper types a value followed by CR or Tab.
+   * Split on the configured terminator first, then tolerate the other one so
+   * a mismatched device setting never silently merges two readings.
+   */
+  function hidSplit(text, terminator) {
+    var s = String(text == null ? "" : text).replace(/\r\n/g, "\r");
+    var primary = terminator === "TAB" ? /\t/ : /\r/;
+    var out = [];
+    s.split(primary).forEach(function (part) {
+      part.split(/[\r\n\t]/).forEach(function (x) {
+        var tok = x.trim();
+        if (tok) out.push(tok);
+      });
+    });
+    return out;
+  }
+
+  /** Turn one HID token into the same DAT0 frame the BLE chain consumes. */
+  function hidToFrame(token) {
+    var m = /^([+-]?)(\d+(?:\.\d+)?)\s*(mm|inch|in|m|i)?$/i.exec(String(token || "").trim());
+    if (!m) return null;
+    var unit = /^(i|inch|in)$/i.test(m[3] || "") ? "i" : "m";
+    return "DAT0:" + unit + (m[1] === "-" ? "-" : "+") + m[2];
+  }
+
   function fileName(batch, stamp, scope, ext) {
     return (batch || "BATCH") + "_" + (stamp || nowStamp()) + "_" + (scope || "ALL") + "." + ext;
   }
@@ -286,6 +328,7 @@
     FrameBuffer: FrameBuffer, parseFrame: parseFrame,
     toMm: toMm, toInch: toInch, fmtMm: fmtMm, fmtSignedMm: fmtSignedMm,
     shouldDrop: shouldDrop, verdict: verdict, stats: stats,
+    validateNam: validateNam, hidSplit: hidSplit, hidToFrame: hidToFrame,
     csvEscape: csvEscape, csvParse: csvParse, csvToRecords: csvToRecords,
     recordsToCsv: recordsToCsv, fileName: fileName,
     nowStamp: nowStamp, today: today, clock: clock
