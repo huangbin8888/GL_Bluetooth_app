@@ -50,7 +50,7 @@ class ChartCanvasView(context: Context) : View(context) {
         }
         val pad = 48f
         val chartHeight = height - pad * 2
-        fun yOf(v: Long): Float = pad + chartHeight * (1f - (v - min) / (max - min))
+        val yOf: (Long) -> Float = { v -> pad + chartHeight * (1f - (v - min) / (max - min)) }
 
         lowerUm?.let { drawLimit(canvas, yOf(it)) }
         upperUm?.let { drawLimit(canvas, yOf(it)) }

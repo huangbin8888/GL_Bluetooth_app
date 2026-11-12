@@ -72,6 +72,8 @@ class MainActivity : ComponentActivity(), UiActions {
 
     override fun onDestroy() {
         (content.getChildAt(0)?.tag as? Job)?.cancel()
+        container.uiEvent = {}
+        pendingBitmap = null
         super.onDestroy()
     }
 
@@ -158,7 +160,7 @@ class MainActivity : ComponentActivity(), UiActions {
 
     override fun onRequestPermissionsResult(
         requestCode: Int,
-        permissions: Array<out String>,
+        permissions: Array<String>,
         grantResults: IntArray
     ) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)

@@ -1,5 +1,6 @@
 package com.guanglu.caliper.core.usecase
 
+import android.os.SystemClock
 import com.guanglu.caliper.core.database.dao.MeasurementDao
 import com.guanglu.caliper.core.database.entity.Measurement
 import com.guanglu.caliper.core.datastore.SettingsRepository
@@ -28,7 +29,7 @@ class CaptureMeasurementsUseCase(
 ) {
     class Clocks(
         val wall: () -> Long = { System.currentTimeMillis() },
-        val elapsed: () -> Long = { android.os.SystemClock.elapsedRealtime() }
+        val elapsed: () -> Long = { SystemClock.elapsedRealtime() }
     )
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)

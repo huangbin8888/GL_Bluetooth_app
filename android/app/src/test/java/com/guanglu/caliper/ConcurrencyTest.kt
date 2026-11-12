@@ -73,7 +73,9 @@ class ConcurrencyTest {
             assertTrue(debouncer.shouldAccept(channel, 155150L, 1000L))
         }
         assertFalse(debouncer.shouldAccept(1, 155150L, 1100L))
-        assertTrue(debouncer.shouldAccept(2, 155150L, 1100L))
+        debouncer.clear(1)
+        assertTrue(debouncer.shouldAccept(1, 155150L, 1100L))
+        assertFalse(debouncer.shouldAccept(2, 155150L, 1100L))
     }
 
     @Test fun debounce_honours_value_delta_and_time_window() {

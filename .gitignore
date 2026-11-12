@@ -5,3 +5,16 @@ __pycache__/
 *.log
 .DS_Store
 Thumbs.db
+
+# Android / Gradle 本地构建产物与签名材料（不入库）
+android/.gradle/
+android/build/
+android/app/build/
+android/local.properties
+android/.idea/
+android/captures/
+android/keystore.properties
+*.apk
+*.aab
+*.keystore
+*.jks

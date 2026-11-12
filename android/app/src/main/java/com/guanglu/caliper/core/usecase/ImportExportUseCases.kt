@@ -10,6 +10,7 @@ import com.guanglu.caliper.core.model.ChannelPalette
 import com.guanglu.caliper.core.model.Units
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import java.time.DateTimeException
 import java.time.Instant
 import java.time.LocalDateTime
 import java.time.ZoneId
@@ -66,7 +67,7 @@ class ImportExportUseCases(
             }
             val capturedAt = try {
                 parseDateTime(row["DATE"].orEmpty(), row["TIME"].orEmpty())
-            } catch (e: Exception) {
+            } catch (e: DateTimeException) {
                 parseErrors++
                 return@forEach
             }
