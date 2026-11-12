@@ -570,35 +570,35 @@ button{cursor:pointer}
                 <span class="chip blue">固定 7 色</span></div>
               <div class="field"><div><label>通道命名 / 改色</label><span class="hint">V2</span></div><span class="chip">V2</span></div>
             </div>
-            <div class="card">
-              <div class="card-title">蓝牙配置（新增 · 设备端参数）</div>
-              <div class="banner" style="background:#FFF7E6;border:1px solid #F0D6A0;color:#7A4E00">
-                <b>设备端参数，App 不下发。</b> 自动发射时长、蓝牙自动休眠、HID 结束符由卡尺固件持有，需厂商配置指令集或 PC 配置工具设置；本页仅按设备登记，便于 7 把卡尺对账。<br>
-                接口文档只定义 <span class="mono">NAM</span> 改广播名；Android 第三方 App 无法配置卡尺 HID 键盘模式参数。
-              </div>
-              <div class="field"><div><label>目标卡尺</label><span class="hint">按通道 / MAC 绑定，只对这一台生效</span></div>
-                <select id="cfgChannel"><option>CH1</option><option>CH2</option><option>CH3</option><option>CH4</option><option>CH5</option><option>CH6</option><option>CH7</option></select></div>
-              <div class="field"><div><label>修改蓝牙名称</label><span class="hint">NAM:&lt;string&gt; · 保留 GL-BLE# 前缀 · ≤16 字符</span></div>
-                <input id="cfgName" value="GL-BLE#0187" style="max-width:150px"></div>
-              <div class="btn-row" style="margin:4px 0 8px">
-                <button class="btn sm primary" data-action="nam-apply">下发改名（NAM）</button>
-                <button class="btn sm" data-action="nam-read">读取当前名称</button>
-              </div>
-              <div class="field"><div><label>自动发射时长</label><span class="hint">设备端参数 · 仅登记</span></div>
-                <input id="cfgAutoEmit" value="30" style="max-width:70px"> 秒</div>
-              <div class="field"><div><label>蓝牙自动休眠</label><span class="hint">设备端参数 · 仅登记</span></div>
-                <button class="switch" data-action="switch" data-key="devSleep"></button></div>
-              <div class="field"><div><label>休眠时间</label><span class="hint">设备端参数 · 仅登记</span></div>
-                <input id="cfgSleepMin" value="5" style="max-width:70px"> 分钟</div>
-              <div class="field"><div><label>结束符（HID 键盘模式）</label><span class="hint">卡尺侧设置；App 侧用作录入分隔符</span></div>
-                <select id="cfgTerminator"><option value="CR">回车 CR / LF</option><option value="TAB">Tab 制表符</option></select></div>
-              <div class="field"><div><label>HID 键盘录入</label><span class="hint">卡尺以键盘配对后，数值注入这里并落库</span></div>
-                <input id="hidInput" placeholder="接收或粘贴数值…" style="max-width:150px"></div>
-              <div class="btn-row" style="margin-top:4px">
-                <button class="btn sm" data-action="cfg-save">保存登记</button>
-                <button class="btn sm" data-action="hid-sample">注入示例 HID 输入</button>
-              </div>
-            </div>
+            <div class="card">
+              <div class="card-title">蓝牙配置（新增 · 设备端参数）</div>
+              <div class="banner" style="background:#FFF7E6;border:1px solid #F0D6A0;color:#7A4E00">
+                <b>设备端参数，App 不下发。</b> 自动发射时长、蓝牙自动休眠、HID 结束符由卡尺固件持有，需厂商配置指令集或 PC 配置工具设置；本页仅按设备登记，便于 7 把卡尺对账。<br>
+                接口文档只定义 <span class="mono">NAM</span> 改广播名；Android 第三方 App 无法配置卡尺 HID 键盘模式参数。
+              </div>
+              <div class="field"><div><label>目标卡尺</label><span class="hint">按通道 / MAC 绑定，只对这一台生效</span></div>
+                <select id="cfgChannel"><option>CH1</option><option>CH2</option><option>CH3</option><option>CH4</option><option>CH5</option><option>CH6</option><option>CH7</option></select></div>
+              <div class="field"><div><label>修改蓝牙名称</label><span class="hint">NAM:&lt;string&gt; · 保留 GL-BLE# 前缀 · ≤16 字符</span></div>
+                <input id="cfgName" value="GL-BLE#0187" style="max-width:150px"></div>
+              <div class="btn-row" style="margin:4px 0 8px">
+                <button class="btn sm primary" data-action="nam-apply">下发改名（NAM）</button>
+                <button class="btn sm" data-action="nam-read">读取当前名称</button>
+              </div>
+              <div class="field"><div><label>自动发射时长</label><span class="hint">设备端参数 · 仅登记</span></div>
+                <input id="cfgAutoEmit" value="30" style="max-width:70px"> 秒</div>
+              <div class="field"><div><label>蓝牙自动休眠</label><span class="hint">设备端参数 · 仅登记</span></div>
+                <button class="switch" data-action="switch" data-key="devSleep"></button></div>
+              <div class="field"><div><label>休眠时间</label><span class="hint">设备端参数 · 仅登记</span></div>
+                <input id="cfgSleepMin" value="5" style="max-width:70px"> 分钟</div>
+              <div class="field"><div><label>结束符（HID 键盘模式）</label><span class="hint">卡尺侧设置；App 侧用作录入分隔符</span></div>
+                <select id="cfgTerminator"><option value="CR">回车 CR / LF</option><option value="TAB">Tab 制表符</option></select></div>
+              <div class="field"><div><label>HID 键盘录入</label><span class="hint">卡尺以键盘配对后，数值注入这里并落库</span></div>
+                <input id="hidInput" placeholder="接收或粘贴数值…" style="max-width:150px"></div>
+              <div class="btn-row" style="margin-top:4px">
+                <button class="btn sm" data-action="cfg-save">保存登记</button>
+                <button class="btn sm" data-action="hid-sample">注入示例 HID 输入</button>
+              </div>
+            </div>
             <div class="card">
               <div class="card-title">采集行为</div>
               <div class="field"><div><label>采集页屏幕常亮</label><span class="hint">息屏断连会永久丢数</span></div>
