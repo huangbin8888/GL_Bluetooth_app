@@ -1,0 +1,631 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>蓝牙卡尺测量数据助手 · 可运行 MVP v1.0</title>
+<style>
+:root{
+  --bg:#F3F5F9; --card:#FFFFFF; --line:#E2E7F0; --text:#16202F; --sub:#6B778C;
+  --primary:#1668E3; --primary-soft:#E8F0FE; --ok:#0F9D58; --ok-soft:#E7F6EE;
+  --bad:#E5384A; --bad-soft:#FDECEE; --warn:#E8912A; --warn-soft:#FFF3E2;
+  --radius:12px; --shadow:0 2px 10px rgba(22,32,47,.06);
+}
+*{box-sizing:border-box}
+html,body{margin:0;padding:0;background:var(--bg);color:var(--text);
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Microsoft YaHei","PingFang SC",sans-serif;
+  font-size:14px;-webkit-font-smoothing:antialiased}
+button,input,select{font-family:inherit;font-size:inherit;color:inherit}
+button{cursor:pointer}
+.hidden{display:none !important}
+
+.topbar{height:58px;background:#fff;border-bottom:1px solid var(--line);display:flex;align-items:center;
+  gap:12px;padding:0 20px;position:sticky;top:0;z-index:20}
+.logo{width:30px;height:30px;border-radius:8px;background:var(--primary);color:#fff;display:flex;
+  align-items:center;justify-content:center;font-weight:700;font-size:15px;flex:none}
+.topbar h1{font-size:16px;margin:0;font-weight:650;letter-spacing:.2px}
+.badge-demo{background:var(--warn-soft);color:#A45F06;border:1px solid #F5D9AE;border-radius:999px;
+  padding:3px 10px;font-size:12px;font-weight:600}
+.topbar .spacer{flex:1}
+.topbar .tip{font-size:12px;color:var(--sub)}
+
+.layout{display:grid;grid-template-columns:220px minmax(430px,1fr) 280px;gap:20px;
+  padding:20px;max-width:1440px;margin:0 auto;align-items:start}
+.panel{background:#fff;border:1px solid var(--line);border-radius:var(--radius);box-shadow:var(--shadow)}
+
+.sidebar{padding:14px;position:sticky;top:78px}
+.side-title{font-size:11px;letter-spacing:1px;color:var(--sub);font-weight:700;margin:2px 6px 10px}
+.nav-item{display:block;width:100%;text-align:left;border:0;background:transparent;padding:10px 10px;
+  border-radius:9px;margin-bottom:3px;line-height:1.35}
+.nav-item:hover{background:#F5F7FB}
+.nav-item.active{background:var(--primary-soft);color:var(--primary);font-weight:650}
+.nav-item b{font-size:13px;font-weight:650}
+.nav-item small{display:block;color:var(--sub);font-size:11px;margin-top:2px;font-weight:400}
+.side-sep{height:1px;background:var(--line);margin:14px 4px}
+.side-note{font-size:11.5px;line-height:1.7;color:var(--sub);padding:0 6px}
+.side-note strong{color:var(--text)}
+
+.stage{min-width:0}
+.stage-toolbar{display:flex;align-items:center;gap:10px;margin-bottom:14px;flex-wrap:wrap}
+.tool-btn{border:1px solid var(--line);background:#fff;border-radius:8px;padding:8px 13px;font-size:13px;font-weight:600}
+.tool-btn:hover{border-color:var(--primary);color:var(--primary)}
+.tool-btn.on{background:var(--primary);color:#fff;border-color:var(--primary)}
+.stage-hint{font-size:12px;color:var(--sub)}
+
+.phone-wrap{display:flex;justify-content:center}
+.phone{width:372px;height:764px;background:#fff;border:9px solid #1C2533;border-radius:30px;
+  box-shadow:0 18px 44px rgba(22,32,47,.20);display:flex;flex-direction:column;overflow:hidden;flex:none}
+.statusbar{height:30px;background:#fff;display:flex;align-items:center;justify-content:space-between;
+  padding:0 16px;font-size:11px;font-weight:650;color:#3C4759;flex:none}
+.status-right{display:flex;align-items:center;gap:6px}
+.sig{display:flex;align-items:flex-end;gap:1.5px;height:10px}
+.sig i{width:3px;background:#3C4759;border-radius:1px;display:block}
+.sig i:nth-child(1){height:4px}.sig i:nth-child(2){height:6px}.sig i:nth-child(3){height:8px}.sig i:nth-child(4){height:10px}
+.batt{width:18px;height:9px;border:1.4px solid #3C4759;border-radius:2px;position:relative}
+.batt:after{content:"";position:absolute;right:-3px;top:2px;width:2px;height:3px;background:#3C4759;border-radius:0 1px 1px 0}
+.batt i{display:block;height:100%;width:78%;background:#3C4759}
+.appbar{height:54px;background:var(--primary);color:#fff;display:flex;align-items:center;gap:10px;
+  padding:0 14px;flex:none}
+.appbar .back{width:26px;height:26px;border:0;background:transparent;color:#fff;font-size:20px;line-height:1}
+.appbar .title{font-size:16px;font-weight:650;flex:1}
+.appbar .ic{font-size:12px;background:rgba(255,255,255,.18);padding:5px 8px;border-radius:6px;font-weight:600}
+.viewport{flex:1;overflow-y:auto;background:var(--bg);padding:12px}
+.viewport::-webkit-scrollbar{width:5px}.viewport::-webkit-scrollbar-thumb{background:#C9D2E0;border-radius:4px}
+.screen{display:none}.screen.active{display:block}
+.tabbar{height:56px;background:#fff;border-top:1px solid var(--line);display:flex;flex:none}
+.tab{flex:1;border:0;background:transparent;display:flex;flex-direction:column;align-items:center;
+  justify-content:center;gap:3px;font-size:10.5px;color:var(--sub)}
+.tab .dot{width:18px;height:18px;border-radius:5px;border:2px solid currentColor;opacity:.55}
+.tab.active{color:var(--primary);font-weight:700}
+.tab.active .dot{background:var(--primary);border-color:var(--primary);opacity:1}
+.navbar{height:20px;background:#fff;display:flex;align-items:center;justify-content:center;flex:none}
+.navbar i{width:96px;height:4px;background:#C8CFDA;border-radius:4px}
+
+.card{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);
+  padding:12px;margin-bottom:10px;box-shadow:var(--shadow)}
+.card.tight{padding:10px 12px}
+.card-title{font-size:12px;font-weight:700;color:var(--sub);letter-spacing:.3px;margin:0 0 9px}
+.row{display:flex;align-items:center;gap:9px}
+.row.between{justify-content:space-between}
+.grow{flex:1;min-width:0}
+.muted{color:var(--sub)}
+.tiny{font-size:11px;line-height:1.6}
+.mono{font-family:ui-monospace,SFMono-Regular,Consolas,"Liberation Mono",monospace}
+.dot{width:8px;height:8px;border-radius:50%;background:var(--sub);flex:none;display:inline-block}
+.dot.ok{background:var(--ok)}.dot.bad{background:var(--bad)}.dot.blue{background:var(--primary)}.dot.warn{background:var(--warn)}
+.chip{display:inline-flex;align-items:center;gap:5px;border-radius:999px;padding:5px 10px;
+  font-size:11.5px;font-weight:650;background:#EEF1F6;color:#46536A;white-space:nowrap}
+.chip.ok{background:var(--ok-soft);color:var(--ok)}
+.chip.bad{background:var(--bad-soft);color:var(--bad)}
+.chip.blue{background:var(--primary-soft);color:var(--primary)}
+.chip.warn{background:var(--warn-soft);color:#A45F06}
+.banner{border-radius:10px;padding:10px 12px;font-size:12px;line-height:1.6;margin-bottom:10px}
+.banner.info{background:var(--primary-soft);color:#124CA8;border:1px solid #CFE0FC}
+.banner.bad{background:var(--bad-soft);color:#A71F30;border:1px solid #F7C9CF}
+.banner.warn{background:var(--warn-soft);color:#8A5208;border:1px solid #F6DDB7}
+.btn{border:1px solid var(--line);background:#fff;border-radius:10px;padding:0 12px;height:44px;
+  font-size:13px;font-weight:650;display:inline-flex;align-items:center;justify-content:center;gap:6px}
+.btn:hover{border-color:var(--primary);color:var(--primary)}
+.btn.primary{background:var(--primary);border-color:var(--primary);color:#fff;height:56px;font-size:16px}
+.btn.primary:hover{background:#0F57C4;color:#fff}
+.btn.danger{color:var(--bad);border-color:#F3C6CC}
+.btn.block{display:flex;width:100%}
+.btn.sm{height:36px;font-size:12px;padding:0 10px}
+.btn-row{display:flex;gap:8px}.btn-row>.btn{flex:1}
+.section-label{font-size:11px;font-weight:700;color:var(--sub);letter-spacing:.4px;margin:14px 2px 7px}
+
+.reading{font-family:ui-monospace,SFMono-Regular,Consolas,monospace;font-size:48px;font-weight:700;
+  letter-spacing:-2px;line-height:1.1;color:var(--text)}
+.reading .u{font-size:18px;font-weight:600;color:var(--sub);letter-spacing:0;margin-left:6px}
+.frame-line{font-size:11.5px;color:var(--sub);margin-top:8px;line-height:1.8}
+.frame-line b{color:var(--primary)}
+.stat-strip{display:flex;gap:6px;margin-bottom:10px}
+.stat{flex:1;background:#fff;border:1px solid var(--line);border-radius:10px;padding:8px 4px;text-align:center}
+.stat b{display:block;font-size:15px;font-weight:700}
+.stat span{font-size:10px;color:var(--sub)}
+.stat-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.stat-box{background:#fff;border:1px solid var(--line);border-radius:10px;padding:10px}
+.stat-box span{font-size:11px;color:var(--sub);display:block}
+.stat-box b{font-size:19px;font-weight:700;display:block;margin-top:3px}
+
+.dev{width:100%;border-collapse:collapse;font-size:11.5px}
+.dev th{text-align:left;color:var(--sub);font-weight:650;padding:5px 6px;border-bottom:1px solid var(--line)}
+.dev td{padding:7px 6px;border-bottom:1px solid #F0F3F8}
+.rec{background:#fff;border:1px solid var(--line);border-radius:10px;padding:9px 11px;margin-bottom:7px;
+  border-left:4px solid var(--ok)}
+.rec.bad{border-left-color:var(--bad);background:#FFF9FA}
+.rec-top{display:flex;align-items:center;gap:8px}
+.rec-seq{font-size:11px;color:var(--sub);width:26px;flex:none}
+.rec-time{font-size:11px;color:var(--sub);flex:1}
+.rec-val{font-family:ui-monospace,Consolas,monospace;font-size:17px;font-weight:700}
+.rec-bot{font-size:10.5px;color:var(--sub);margin-top:5px;padding-left:34px;line-height:1.5}
+
+.seg{display:flex;background:#EEF1F6;border-radius:9px;padding:3px;gap:3px}
+.seg button{flex:1;border:0;background:transparent;height:32px;border-radius:7px;font-size:12.5px;font-weight:650;color:var(--sub)}
+.seg button.on{background:#fff;color:var(--primary);box-shadow:0 1px 4px rgba(0,0,0,.08)}
+.field{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:9px 0;border-bottom:1px solid #F0F3F8}
+.field:last-child{border-bottom:0}
+.field label{font-size:12.5px}
+.field .hint{font-size:10.5px;color:var(--sub);display:block;margin-top:2px}
+.field input,.field select{width:112px;height:34px;border:1px solid var(--line);border-radius:8px;padding:0 8px;
+  text-align:right;background:#FBFCFE;font-size:12.5px}
+.switch{width:42px;height:24px;border-radius:999px;background:#CCD4E0;border:0;position:relative;flex:none}
+.switch:after{content:"";position:absolute;top:3px;left:3px;width:18px;height:18px;border-radius:50%;background:#fff;transition:.15s}
+.switch.on{background:var(--primary)}.switch.on:after{left:21px}
+.check{display:flex;align-items:center;gap:10px;padding:11px 0;border-bottom:1px solid #F0F3F8}
+.check:last-child{border-bottom:0}
+.check .box{width:22px;height:22px;border-radius:6px;border:2px solid #C6D0DE;flex:none;
+  display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:800;color:#fff}
+.check .box.on{background:var(--primary);border-color:var(--primary)}
+.demo-box{border:1px dashed #C8D3E4;border-radius:10px;padding:10px;margin-top:12px;background:#F9FBFF}
+.demo-box .card-title{color:#8A97AC}
+.chart-box{background:#fff;border:1px solid var(--line);border-radius:12px;padding:10px 6px 4px;margin-bottom:10px}
+.chart-box svg{display:block;width:100%;height:auto}
+.file-line{background:#F5F7FB;border:1px solid var(--line);border-radius:8px;padding:8px 10px;
+  font-family:ui-monospace,Consolas,monospace;font-size:11.5px;margin-bottom:6px;word-break:break-all}
+
+/* v0.2 新增：实时检测两列表格 + 多通道色标 */
+.live-table{width:100%;border-collapse:collapse;background:#fff;font-size:12.5px}
+.live-table th{text-align:left;color:var(--sub);font-weight:650;font-size:11px;padding:7px 9px;
+  border-bottom:1px solid var(--line);background:#FAFBFD}
+.live-table td{padding:8px 9px;border-bottom:1px solid #F0F3F8}
+.live-table tbody tr{cursor:pointer}
+.live-table tbody tr:hover td{background:#F5F8FF}
+.live-table td.t{color:var(--sub);font-family:ui-monospace,Consolas,monospace;font-size:11.5px;
+  white-space:nowrap;width:40%;border-left:3px solid var(--ok)}
+.live-table tr.bad td.t{border-left-color:var(--bad)}
+.live-table td.v{text-align:right;font-family:ui-monospace,Consolas,monospace;font-size:15px;font-weight:700}
+.live-table tr.bad td.v{color:var(--bad)}
+.ch-mark{display:inline-flex;align-items:center;border-radius:4px;padding:2px 5px;margin-right:7px;
+  vertical-align:middle;color:#fff;font-size:9.5px;font-weight:700;font-family:inherit}
+.ch-strip{display:flex;gap:5px;flex-wrap:wrap;margin-bottom:9px}
+.ch-chip{border:1px solid var(--line);background:#fff;border-radius:999px;padding:5px 9px;
+  font-size:11px;font-weight:650;display:inline-flex;align-items:center;gap:5px;line-height:1.2}
+.ch-chip.on{background:var(--primary-soft);border-color:#B9D2FA;color:var(--primary)}
+.ch-chip:hover{border-color:var(--primary)}
+.ch-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.ch-card{background:#fff;border:1px solid var(--line);border-radius:10px;padding:9px 8px;
+  position:relative;overflow:hidden}
+.ch-card:before{content:"";position:absolute;left:0;top:0;bottom:0;width:4px;background:var(--ch)}
+.ch-card.off{opacity:.56}
+.ch-card.focus{box-shadow:0 0 0 2px var(--primary)}
+.ch-card .ch-h{display:flex;align-items:center;justify-content:space-between;margin-bottom:5px;padding-left:5px}
+.ch-card .ch-v{font-family:ui-monospace,Consolas,monospace;font-size:20px;font-weight:700;
+  padding-left:5px;line-height:1.15}
+.ch-card .ch-m{font-size:9.5px;color:var(--sub);padding-left:5px;margin-top:4px;line-height:1.5}
+.ch-slot{display:inline-block;width:26px;height:22px;border-radius:6px;background:#EEF1F6;color:#8A97AC;
+  font-size:10px;font-weight:700;text-align:center;line-height:22px;flex:none}
+.ch-slot.on{color:#fff}
+.ch-legend{display:flex;gap:4px;flex-wrap:wrap;margin-top:8px}
+.ch-legend span{font-size:9.5px;font-weight:700;color:#fff;border-radius:4px;padding:3px 6px}
+
+.notes{padding:16px;position:sticky;top:78px}
+.notes h2{font-size:14px;margin:0 0 4px}
+.notes .np{font-size:11px;color:var(--sub);margin-bottom:14px}
+.notes h3{font-size:11px;letter-spacing:.6px;color:var(--sub);margin:16px 0 7px}
+.notes ul{margin:0;padding-left:16px;font-size:12px;line-height:1.9;color:#3B475B}
+.notes .tag{display:inline-block;background:var(--primary-soft);color:var(--primary);border-radius:5px;
+  padding:1px 6px;font-size:10.5px;font-weight:700;margin-right:5px}
+.notes .disc{border-top:1px solid var(--line);margin-top:16px;padding-top:12px;font-size:11px;
+  line-height:1.7;color:var(--sub)}
+
+.overview{display:grid;grid-template-columns:repeat(auto-fill,minmax(168px,1fr));gap:16px;justify-items:start}
+.mini-wrap{width:168px;height:346px;overflow:hidden;border-radius:12px;position:relative}
+.mini-phone{transform:scale(.44);transform-origin:top left;pointer-events:none}
+.mini-label{position:absolute;left:0;bottom:0;right:0;background:rgba(22,32,47,.86);color:#fff;
+  font-size:11px;font-weight:650;padding:6px 9px;z-index:2}
+
+.toast{position:fixed;left:50%;bottom:34px;transform:translate(-50%,20px);background:#1C2533;color:#fff;
+  padding:11px 18px;border-radius:10px;font-size:13px;box-shadow:0 8px 26px rgba(0,0,0,.25);
+  opacity:0;transition:.22s;z-index:60;max-width:80vw;text-align:center}
+.toast.show{opacity:1;transform:translate(-50%,0)}
+.modal-mask{position:fixed;inset:0;background:rgba(18,26,40,.42);display:flex;align-items:center;
+  justify-content:center;z-index:55}
+.modal{width:320px;background:#fff;border-radius:14px;padding:16px;box-shadow:0 18px 44px rgba(0,0,0,.25)}
+.modal h3{margin:0 0 6px;font-size:15px}
+.modal p{margin:0 0 12px;font-size:12px;color:var(--sub);line-height:1.6}
+.modal input{width:100%;height:40px;border:1px solid var(--line);border-radius:9px;padding:0 10px;margin-bottom:12px}
+@media(max-width:1180px){.layout{grid-template-columns:200px 1fr}.notes{display:none}}
+@media(max-width:820px){.layout{grid-template-columns:1fr;padding:12px}.sidebar{position:static;order:2}
+  .stage{order:1}.topbar .tip{display:none}}
+
+/* MVP additive styles */
+.runtime-bar{display:flex;gap:18px;align-items:center;flex-wrap:wrap;padding:9px 18px;
+  background:#0F1B2D;color:#DCE6F5;font-size:11.5px;line-height:1.5}
+.runtime-bar b{color:#fff}
+.runtime-bar .rb-hint{margin-left:auto;color:#8FA6C4}
+.runtime-bar span{white-space:nowrap}
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <div class="logo">GL</div>
+  <h1>蓝牙卡尺测量数据助手</h1>
+  <span class="badge-demo">可运行 MVP · v1.0</span>
+  <div class="spacer"></div>
+  <span class="tip">真实蓝牙 / 本地数据库 / 真实导入导出 · 无硬件时自动降级演示模式</span>
+</div>
+
+<div class="runtime-bar" id="runtimeBar"></div>
+
+<div class="layout">
+  <aside class="sidebar panel">
+    <div class="side-title">页面导航 · P1–P7</div>
+    <button class="nav-item" data-action="go" data-page="P1"><b>P1 连接卡尺</b><small>扫描 / 权限 / 10 通道槽位</small></button>
+    <button class="nav-item active" data-action="go" data-page="P2"><b>P2 实时检测 · 记录</b><small>合并页 · 时间+数值两列表格</small></button>
+    <button class="nav-item" data-action="go" data-page="P3"><b>P3 多通道</b><small>新增 · 10 路读数与显示方案</small></button>
+    <button class="nav-item" data-action="go" data-page="P4"><b>P4 表格模板</b><small>CSV 模板 / 字段映射</small></button>
+    <button class="nav-item" data-action="go" data-page="P5"><b>P5 数据分析</b><small>折线图 / 柱状图 / 通道筛选</small></button>
+    <button class="nav-item" data-action="go" data-page="P6"><b>P6 导出到本地</b><small>PNG + CSV / 按通道分文件</small></button>
+    <button class="nav-item" data-action="go" data-page="P7"><b>P7 设置</b><small>公差 / 去抖 / 通道上限</small></button>
+    <div class="side-sep"></div>
+    <div class="side-note">
+      <strong>这是界面原型，不是 App 源码。</strong><br>
+      对照 <strong>README.md ④ 页面文字原型</strong> 与 <strong>V1开发基线.md 第 5 节</strong> 的 12 项必补约束绘制。<br><br>
+      <strong>这是可运行 MVP，不是静态原型。</strong>界面框架（三栏工作台、手机外壳、P1–P7、7 屏总览、底部 tab、演示控制、右侧对照）<strong>逐字沿用你已认可的 demo</strong>，只把数据层换成真实实现。<br><br>
+      <strong>MVP 新增能力</strong>：① Web Bluetooth 真连 <span class="mono">GL-BLE#</span> 卡尺，解析 <span class="mono">DAT0/DAT1</span>、拆包粘包、inch→mm、完整帧回 <span class="mono">DAT0:OK</span>、<span class="mono">MEAS/CLR/MOD</span> 指令；② 10 通道独立订阅 / 去抖 / 落库，跨通道不去重；③ IndexedDB 本地库，收到即落库、刷新不丢；④ 真实 CSV 导入导出（BOM / 中文别名 / CHANNEL 列）与图表 PNG 导出；⑤ 诊断日志、屏幕常亮、断连保护。<br><br>
+      <strong>无卡尺时</strong>自动进入演示模式，注入的原始帧走<strong>同一条解析 → 去抖 → 落库 → 渲染链路</strong>；左下「演示控制」是状态注入器，<strong>不属于业务功能按钮</strong>。
+    </div>
+  </aside>
+
+  <main class="stage">
+    <div class="stage-toolbar">
+      <button class="tool-btn" id="overviewBtn" data-action="overview">总览 7 屏</button>
+      <button class="tool-btn" data-action="reset-demo">重置演示数据</button>
+      <span class="stage-hint" id="stageHint">当前：单屏交互模式 · 点击左侧导航切换页面</span>
+    </div>
+
+    <div class="phone-wrap" id="phoneWrap">
+      <div class="phone" id="phone">
+        <div class="statusbar">
+          <span>09:49</span>
+          <div class="status-right">
+            <span style="font-size:10px">BLE ×10</span>
+            <span class="sig"><i></i><i></i><i></i><i></i></span>
+            <span class="batt"><i></i></span>
+          </div>
+        </div>
+        <div class="appbar">
+          <button class="back" data-action="go" data-page="P2" title="返回采集页">‹</button>
+          <span class="title" id="appTitle">实时检测 · 记录</span>
+          <span class="ic" id="appBadge">手动</span>
+        </div>
+        <div class="viewport" id="viewport">
+
+          <!-- P1 -->
+          <section class="screen" data-id="P1">
+            <div class="card tight">
+              <div class="row between">
+                <div class="row"><span class="dot" id="p1dot"></span><b id="p1state">已连接 0 / 10 通道</b></div>
+                <span class="chip blue" id="p1mac">GL-BLE# 前缀 · 上限 10</span>
+              </div>
+              <div class="tiny muted" style="margin-top:7px" id="p1sub">上次连接：A4:C1:38:01:87 · 10 路按上次 MAC 自动重连</div>
+            </div>
+            <div class="banner info">长按卡尺红色 data 键 3 秒，液晶闪 <b>OK</b> 后开始扫描。<span class="muted">（接口文档）</span><br>
+              <b>最多同时连接 10 台</b>，第 11 台扫描到也不连接并提示通道已满。</div>
+            <div class="banner warn" id="permBanner">
+              蓝牙 / 定位权限未确认，或系统定位总开关关闭时扫描不到设备。
+              <button class="btn sm" style="margin-top:8px" data-action="perm">去系统设置</button>
+            </div>
+            <div class="section-label">附近设备 · 通道槽位 1–10</div>
+            <div class="card" id="deviceList"></div>
+            <div class="btn-row">
+              <button class="btn primary" data-action="scan" style="flex:2">扫描设备</button>
+              <button class="btn danger" data-action="disconnect" style="flex:1">全部断开</button>
+            </div>
+            <button class="btn block" style="margin-top:8px" data-action="connect-all">连接全部 10 台</button>
+            <div class="tiny muted" style="margin-top:10px;line-height:1.7">
+              机型适配：连接前先停止扫描；Android 限制 30 秒内最多 5 次扫描；重连后重新发现服务并订阅 notify。<br>
+              10 路 GATT 走串行命令队列；单通道断连不影响其他通道继续采集。<br>
+              <b>注意</b>：Android AOSP 蓝牙栈默认并发上限为 7（<span class="mono">GATT_MAX_PHY_CHANNEL</span>），10 路属机型相关能力；达不到时 App 明确提示「已达该机型上限」，不静默失败，属 M0 必验项。
+            </div>
+          </section>
+
+          <!-- P2 · 原 P2 + 原 P3 合并为一屏 -->
+          <section class="screen active" data-id="P2">
+            <div class="banner bad hidden" id="discBanner">
+              <b>蓝牙已断开，正在重连</b><br>
+              卡尺不保存历史数据，断连期间无法补录 · <span id="lostText">已丢失 0 次上报</span>
+            </div>
+            <div class="card">
+              <div class="row between" style="margin-bottom:6px">
+                <span class="card-title" style="margin:0">当前读数 · <span id="mainChLabel">CH1</span></span>
+                <span class="chip blue" id="modeChip">手动 · DAT0</span>
+              </div>
+              <div class="reading"><span id="readingVal">+155.15</span><span class="u" id="readingUnit">mm</span></div>
+              <div class="frame-line">
+                原始帧 <b class="mono" id="rawFrame">DAT0:m+155.15</b><br>
+                回包 <b class="mono" id="ackFrame">DAT0:OK</b> · 完整帧解析成功后才回
+              </div>
+            </div>
+            <div class="section-label" style="margin-top:4px">通道筛选（表格 / 图表同步）</div>
+            <div class="ch-strip" id="p2Chips"></div>
+
+            <!-- 实时检测 = 检测记录，同一屏、同一张两列表格；放在首屏主体位置 -->
+            <div class="card" style="padding:0;overflow:hidden">
+              <div class="row between" style="padding:9px 10px;border-bottom:1px solid var(--line);background:#fff">
+                <div><b style="font-size:12.5px">实时检测 / 检测记录</b>
+                  <div class="tiny muted" style="margin-top:2px">同一界面 · 每来一帧立即追加一行</div></div>
+                <span class="chip blue" id="tableScope">全部通道</span>
+              </div>
+              <table class="live-table">
+                <thead><tr><th>时间</th><th style="text-align:right">数值 (mm)</th></tr></thead>
+                <tbody id="liveBody"></tbody>
+              </table>
+              <div class="tiny muted" style="padding:8px 10px;border-top:1px solid var(--line);line-height:1.6;background:#FAFBFD">
+                只保留 <b>时间 + 数值</b> 两列 · 通道用行内色标、判定用左侧色条、备注点行查看（均不占列）
+              </div>
+            </div>
+
+            <div class="stat-strip" id="statStrip"></div>
+            <div class="card tight">
+              <div class="row between">
+                <div><div class="tiny muted">当前批次</div><b style="font-size:13px" id="batchName">B20261112-01</b></div>
+                <div style="text-align:right"><div class="tiny muted">本次已记</div><b style="font-size:18px" id="countVal">10 条</b></div>
+              </div>
+              <div class="row" style="margin-top:9px;flex-wrap:wrap;gap:6px">
+                <span class="chip ok" id="onlineChip"><span class="dot ok"></span>10 通道在线</span>
+                <span class="chip">采集时屏幕常亮</span>
+                <span class="chip">按通道独立去抖 ≤0.01mm / 300ms</span>
+              </div>
+            </div>
+
+            <div class="seg" style="margin-bottom:10px">
+              <button class="on" data-action="unit" data-unit="mm">mm</button>
+              <button data-action="unit" data-unit="inch">inch</button>
+            </div>
+            <button class="btn primary block" data-action="record" id="recordBtn">记录一条（主通道）</button>
+            <div class="btn-row" style="margin-top:8px">
+              <button class="btn" data-action="meas">发一次采集 MEAS</button>
+              <button class="btn" data-action="clr">清零 CLR</button>
+            </div>
+            <div class="btn-row" style="margin-top:8px">
+              <button class="btn" data-action="toggle-mode" id="modeBtn">切换为连续</button>
+              <button class="btn" data-action="go" data-page="P7">设置</button>
+            </div>
+            <div class="btn-row" style="margin-top:8px">
+              <button class="btn" data-action="go" data-page="P3">多通道 10 路</button>
+              <button class="btn" data-action="go" data-page="P5">查看图表</button>
+            </div>
+            <div class="btn-row" style="margin-top:8px">
+              <button class="btn" data-action="go" data-page="P4">模板</button>
+              <button class="btn" data-action="go" data-page="P6">导出</button>
+            </div>
+            <div class="demo-box">
+              <div class="card-title">演示控制（非 App 功能）</div>
+              <div class="btn-row">
+                <button class="btn sm" data-action="frame">来一帧 DAT0</button>
+                <button class="btn sm" data-action="burst">DAT1 连发</button>
+              </div>
+              <div class="btn-row" style="margin-top:7px">
+                <button class="btn sm" data-action="ch-burst">10 路并发来帧</button>
+                <button class="btn sm" data-action="ch-drop">CH3 断连</button>
+              </div>
+              <div class="btn-row" style="margin-top:7px">
+                <button class="btn sm" data-action="toggle-disconnect" id="discBtn">模拟断连</button>
+                <button class="btn sm" data-action="err">MEAS:ERR</button>
+              </div>
+              <div class="tiny muted" style="margin-top:8px" id="demoLog">去重丢弃 0 帧 · 未落库 0 条</div>
+            </div>
+          </section>
+
+          <!-- P3 · 新增：多通道（原 P3 记录内容已并入 P2） -->
+          <section class="screen" data-id="P3">
+            <div class="banner info">
+              <b>最多 10 通道并发</b>：一台手机同时连接 10 台 <span class="mono">GL-BLE#</span> 卡尺。<br>
+              每路独立 notify 订阅、帧缓冲、去重与落库；<b>跨通道不去重</b>。
+            </div>
+            <div class="card tight">
+              <div class="row between">
+                <div><div class="tiny muted">通道占用</div><b id="chCount" style="font-size:18px">0 / 10 在线</b></div>
+                <span class="chip blue">上限 10 台</span>
+              </div>
+              <div class="ch-legend" id="chLegend"></div>
+            </div>
+            <div class="section-label">实时读数 · 10 通道卡片墙</div>
+            <div class="ch-grid" id="channelGrid"></div>
+            <div class="card tight" style="margin-top:10px">
+              <div class="card-title">多通道显示方案（避免 10 路数据糊在一起）</div>
+              <div class="tiny muted" style="line-height:1.8">
+                ① <b>固定 10 色编码</b>：连接列表 / 实时表格 / 通道卡 / 图表点 / 导出文件全局一致；<br>
+                ② <b>实时检测与记录合并一屏</b>，表格只留「时间 + 数值」两列，通道用行内色标区分；<br>
+                ③ 顶部通道 chips 一键筛选单通道，默认全部按时间混排；<br>
+                ④ 10 路读数用<b>卡片墙平铺</b>，不在采集页堆 10 个大数字；<br>
+                ⑤ 图表可叠加（点按通道着色）或单通道查看；导出可合并或按通道分文件；<br>
+                ⑥ 单通道断连只灰掉该卡并计数，其余 9 路继续采集。
+              </div>
+            </div>
+            <div class="btn-row">
+              <button class="btn" data-action="connect-all">连接全部 10 台</button>
+              <button class="btn" data-action="ch-burst">10 路并发来帧</button>
+            </div>
+            <div class="btn-row" style="margin-top:8px">
+              <button class="btn" data-action="go" data-page="P2">回实时检测</button>
+              <button class="btn" data-action="go" data-page="P5">看叠加图表</button>
+            </div>
+            <div class="tiny muted" style="margin-top:10px;line-height:1.7">
+              第 11 台设备扫描到也不连接并提示上限；10 路 GATT 命令串行队列，连接前先 stopScan()；
+              重连后每路各自重新 discoverServices + 订阅 notify。
+            </div>
+          </section>
+
+          <!-- P4 -->
+          <section class="screen" data-id="P4">
+            <div class="banner info">V1 支持 <b>CSV 表头模板</b>；自定义 xlsx 模板（合并单元格、公式、样式）<b>延到 V2</b>。</div>
+            <div class="section-label">模板列表</div>
+            <div class="card tight">
+              <div class="row between">
+                <div><b style="font-size:13px">内置默认模板</b><div class="tiny muted">15 列 · 稳定大写 key + 中文别名</div></div>
+                <span class="chip ok">使用中</span>
+              </div>
+            </div>
+            <div class="card tight">
+              <div class="row between">
+                <div><b style="font-size:13px">gl_caliper_default.csv</b><div class="tiny muted">已导入 · UTF-8 BOM</div></div>
+                <span class="chip">已导入</span>
+              </div>
+            </div>
+            <div class="section-label">字段预览（前 8 列 / 共 15 列）</div>
+            <div class="card" style="padding:4px 8px">
+              <table class="dev"><thead><tr><th>列名 key</th><th>中文别名</th><th>类型</th><th>必填</th></tr></thead><tbody>
+                <tr><td class="mono">DATE</td><td>日期</td><td>yyyy-MM-dd</td><td>是</td></tr>
+                <tr><td class="mono">TIME</td><td>时间</td><td>HH:mm:ss</td><td>否</td></tr>
+                <tr><td class="mono">SEQ</td><td>序号</td><td>Int</td><td>否</td></tr>
+                <tr><td class="mono">BATCH</td><td>批次</td><td>Text</td><td>否</td></tr>
+                <tr><td class="mono">ITEM</td><td>检验项目</td><td>Text</td><td>否</td></tr>
+                <tr><td class="mono">NOMINAL</td><td>公称值</td><td>mm</td><td>否</td></tr>
+                <tr><td class="mono">LOWER_TOL</td><td>下偏差</td><td>mm</td><td>否</td></tr>
+                <tr><td class="mono">UPPER_TOL</td><td>上偏差</td><td>mm</td><td>否</td></tr>
+              </tbody></table>
+            </div>
+            <div class="banner warn hidden" id="mapPreview">
+              <b>字段映射预览</b><br>
+              识别 15 列 · 中文别名命中 6 列 · 未识别 2 列将跳过并记入导入报告 · 首列已剥离 BOM。<br>
+              <b>多通道补充</b>：导出的 CSV 增加 <span class="mono">CHANNEL</span> 列（CH1–CH10），导入时按该列还原通道归属。
+            </div>
+            <div class="btn-row">
+              <button class="btn primary" style="height:44px;font-size:13px" data-action="upload-template">上传模板</button>
+              <button class="btn" data-action="set-template">设为当前</button>
+            </div>
+            <button class="btn block danger" style="margin-top:8px" data-action="delete-template">删除模板</button>
+          </section>
+
+          <!-- P5 -->
+          <section class="screen" data-id="P5">
+            <div class="seg" style="margin-bottom:10px">
+              <button class="on" data-action="chart" data-type="line" id="segLine">折线图</button>
+              <button data-action="chart" data-type="bar" id="segBar">柱状图</button>
+            </div>
+            <div class="section-label" style="margin-top:2px">通道筛选 / 叠加</div>
+            <div class="ch-strip" id="p5Chips"></div>
+            <div class="row" style="margin-bottom:10px;gap:6px;flex-wrap:wrap">
+              <span class="chip blue">批次：B20261112-01</span>
+              <span class="chip">公差 154.80 – 155.20</span>
+              <span class="chip">点按通道着色 · 超差描红</span>
+            </div>
+            <div class="chart-box" id="chartBox"></div>
+            <div class="stat-grid" id="chartStats"></div>
+            <div class="btn-row" style="margin-top:10px">
+              <button class="btn primary" style="height:44px;font-size:13px" data-action="go" data-page="P6">导出这张图</button>
+              <button class="btn" data-action="go" data-page="P2">返回实时检测</button>
+            </div>
+          </section>
+
+          <!-- P6 -->
+          <section class="screen" data-id="P6">
+            <div class="card">
+              <div class="card-title">导出内容</div>
+              <div class="check" data-action="export-toggle" data-kind="png">
+                <span class="box on" id="boxPng">✓</span>
+                <div class="grow"><b style="font-size:13px">图表 PNG</b><div class="tiny muted">当前折线图 / 柱状图（按所选通道）</div></div>
+              </div>
+              <div class="check" data-action="export-toggle" data-kind="csv">
+                <span class="box on" id="boxCsv">✓</span>
+                <div class="grow"><b style="font-size:13px">数据 CSV</b><div class="tiny muted">默认勾选 · 只导图片会把数据锁死在 App 里</div></div>
+              </div>
+            </div>
+            <div class="card">
+              <div class="card-title">多通道导出范围（新增）</div>
+              <div class="check" data-action="export-mode" data-mode="merge">
+                <span class="box on" id="boxMerge">✓</span>
+                <div class="grow"><b style="font-size:13px">合并为一个 CSV</b><div class="tiny muted">含 CHANNEL 通道列，10 路按时间混排</div></div>
+              </div>
+              <div class="check" data-action="export-mode" data-mode="split">
+                <span class="box" id="boxSplit"></span>
+                <div class="grow"><b style="font-size:13px">按通道分文件</b><div class="tiny muted">每个在线通道一个 CSV，文件名带 _CHn</div></div>
+              </div>
+            </div>
+            <div class="section-label">文件名预览</div>
+            <div class="file-line" id="filePng">B20261112-01_20261112_0950_ALL.png</div>
+            <div class="file-line" id="fileCsv">B20261112-01_20261112_0950_ALL.csv</div>
+            <div class="banner info">
+              保存到手机「下载 / Documents」，走系统文件选择器 SAF；不申请宽泛存储权限。<br>
+              CSV 为 UTF-8 BOM，可重新导入；同名文件不覆盖。
+            </div>
+            <button class="btn primary block" data-action="save-export">保存</button>
+            <div class="btn-row" style="margin-top:8px">
+              <button class="btn" data-action="share">分享</button>
+              <button class="btn" data-action="go" data-page="P2">完成</button>
+            </div>
+          </section>
+
+          <!-- P7 -->
+          <section class="screen" data-id="P7">
+            <div class="card">
+              <div class="card-title">测量与判定</div>
+              <div class="field"><div><label>默认单位</label><span class="hint">内部统一存整数微米</span></div>
+                <select id="setUnit"><option>mm</option><option>inch</option></select></div>
+              <div class="field"><div><label>小数位数</label></div><input id="setDigits" value="4"></div>
+              <div class="field"><div><label>公称值</label></div><input id="setNominal" value="155.00"></div>
+              <div class="field"><div><label>公差下限</label></div><input id="setLower" value="154.80"></div>
+              <div class="field"><div><label>公差上限</label></div><input id="setUpper" value="155.20"></div>
+              <div class="field"><div><label>连续模式去抖阈值</label><span class="hint">值变化 ≤0.01mm 且 ≤300ms 丢弃（按通道独立）</span></div><input id="setDebounce" value="300 ms"></div>
+              <div class="field"><div><label>设备广播名前缀</label></div><input id="setPrefix" value="GL-BLE#"></div>
+            </div>
+            <div class="card">
+              <div class="card-title">多通道（新增）</div>
+              <div class="field"><div><label>最大并发通道数</label><span class="hint">上限 10 台，第 11 台拒绝连接</span></div><input id="setMaxCh" value="10" readonly></div>
+              <div class="field"><div><label>通道色标</label><span class="hint">CH1–CH10 固定配色，全 App 一致</span></div>
+                <span class="chip blue">固定 10 色</span></div>
+              <div class="field"><div><label>通道命名 / 改色</label><span class="hint">V2</span></div><span class="chip">V2</span></div>
+            </div>
+            <div class="card">
+              <div class="card-title">采集行为</div>
+              <div class="field"><div><label>采集页屏幕常亮</label><span class="hint">息屏断连会永久丢数</span></div>
+                <button class="switch on" data-action="switch" data-key="screen"></button></div>
+              <div class="field"><div><label>自动重连上次 MAC</label><span class="hint">10 路各自记住上次 MAC</span></div>
+                <button class="switch on" data-action="switch" data-key="reconnect"></button></div>
+            </div>
+            <div class="card tight">
+              <div class="card-title">维护入口</div>
+              <div class="btn-row" style="margin-bottom:7px">
+                <button class="btn sm" data-action="diag">导出诊断日志</button>
+                <button class="btn sm" data-action="battery">电池优化白名单</button>
+              </div>
+              <button class="btn sm block" data-action="perm">权限引导页</button>
+            </div>
+            <div class="btn-row">
+              <button class="btn primary" style="height:44px;font-size:13px" data-action="settings-save">保存</button>
+              <button class="btn" data-action="settings-reset">恢复默认</button>
+            </div>
+            <div class="tiny muted" style="text-align:center;margin-top:12px">
+              MVP v1.0 · 本地分发 · 升级前请先导出 CSV 备份
+            </div>
+          </section>
+
+        </div>
+        <div class="tabbar">
+          <button class="tab" data-action="go" data-page="P1"><span class="dot"></span>连接</button>
+          <button class="tab active" data-action="go" data-page="P2"><span class="dot"></span>检测</button>
+          <button class="tab" data-action="go" data-page="P3"><span class="dot"></span>通道</button>
+          <button class="tab" data-action="go" data-page="P5"><span class="dot"></span>分析</button>
+        </div>
+        <div class="navbar"><i></i></div>
+      </div>
+    </div>
+
+    <div class="overview hidden" id="overview"></div>
+  </main>
+
+  <aside class="notes panel" id="notes">
+    <h2 id="noteTitle">P2 实时检测 · 记录</h2>
+    <div class="np" id="noteSub">README ④ 页面文字原型 · 合并页</div>
+    <div id="noteBody"></div>
+    <div class="disc">
+      MVP 已在浏览器里跑通协议解析、本地库与导入导出；<b>它不是 Android APK</b>。已确认的技术路线 C（原生 Kotlin + Room + blessed-android + Vico）仍是正式 App 落点，本机无 JDK / Android SDK，无法编译验证，故本版用于先把功能链路与界面跑通。<br>
+      正式 APK 与 M0 实机验证（7 路协议栈上限、10 路机型实测、release 签名）仍待有卡尺与真机后推进；技术基线以 <b>V1开发基线.md</b> 为准。<br>
+      v1.0 只加「真实链路 + 10 通道」，界面框架与既有功能保持不变。
+    </div>
+  </aside>
+</div>
+
+<div class="toast" id="toast"></div>
+<div id="modalHost"></div>
+<input type="file" id="csvFile" accept=".csv,text/csv" style="display:none">
+
+<script src="protocol.js" charset="utf-8"></script>
+<script src="runtime.js" charset="utf-8"></script>
+<script src="app.js" charset="utf-8"></script>
+</body>
+</html>

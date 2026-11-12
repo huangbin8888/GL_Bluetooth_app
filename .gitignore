@@ -1,0 +1,7 @@
+# WorkBuddy project data / local memory - keep locally, never publish
+.workbuddy/
+__pycache__/
+*.pyc
+*.log
+.DS_Store
+Thumbs.db
