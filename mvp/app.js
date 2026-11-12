@@ -818,6 +818,9 @@
       toast("MVP 就绪 · 存储="+RT.Store.backend+" · 蓝牙="+(RT.BLE.supported()&&RT.BLE.secure()?"可用":"演示模式"));
       /* Smoke-test entry: ?selftest=1 drives the real chain after init settles. */
       if(location.search.indexOf("selftest=1")>=0){
+        /* Deterministic demo values: random simVal() made dedup counts jitter
+           between runs, so the smoke test was not reproducible. */
+        simVal=function(){ return 155.15; };
         var before=S.records.length;
         OVERRIDE.frame(); OVERRIDE["ch-burst"](); OVERRIDE.burst();
         setTimeout(function(){
