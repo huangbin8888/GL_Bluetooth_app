@@ -14,6 +14,7 @@ import com.guanglu.caliper.core.bluetooth.device.CaliperCommand
 import com.guanglu.caliper.core.database.entity.Measurement
 import com.guanglu.caliper.core.model.ChannelPalette
 import com.guanglu.caliper.core.model.Units
+import com.guanglu.caliper.core.model.valueToneOf
 import com.guanglu.caliper.ui.*
 import com.guanglu.caliper.ui.chart.ChartCanvasView
 import kotlinx.coroutines.CoroutineScope
@@ -291,10 +292,12 @@ object Pages {
                 (total.getChildAt(0) as TextView).text = "${items.size}"
                 (ok.getChildAt(0) as TextView).text = "${items.count { it.verdict == "PASS" }}"
                 (bad.getChildAt(0) as TextView).text = "${items.count { it.verdict == "FAIL" }}"
-                val latestValue = items.firstOrNull()?.let {
+                val latestItem = items.firstOrNull()
+                val latestValue = latestItem?.let {
                     Units.formatMm(it.valueUm10, c.settings.decimals)
                 } ?: "—"
                 setReading(reading, latestValue)
+                reading.setTextColor(valueTextColor(valueToneOf(latestItem?.verdict.orEmpty())))
             }
         }
         page.tag = job
@@ -718,7 +721,7 @@ object Pages {
         val lower = context.webEdit(c.settings.lowerLimitUm10?.let { Units.formatMm(it) } ?: "")
         val upper = context.webEdit(c.settings.upperLimitUm10?.let { Units.formatMm(it) } ?: "")
         card.addView(webField("小数位数（0–4）", "显示与导出统一，默认 4 位不四舍五入", decimals))
-        card.addView(webField("公差下限 (mm)", "", lower))
+        card.addView(webField("公差下限 (mm)", "设置上下公差后才会判定超差；超差数值变红并蜂鸣，未设为「未判定」", lower))
         card.addView(webField("公差上限 (mm)", "", upper))
         card.addView(webButton("保存测量设置", small = true) {
             decimals.text.toString().toIntOrNull()?.let { c.settings.decimals = it }
@@ -752,6 +755,7 @@ object Pages {
             actions.toast(if (checked) "已开启自动重连：下次启动自动连接" else "已关闭自动重连")
         }
         behavior.addView(webField("自动重连上次设备", "启动时自动连接上次连接过的卡尺", autoSwitch))
+        behavior.addView(overLimitBeepField(context, c, actions))
         val idleMinutes = context.webEdit(c.settings.idleDisconnectMinutes.toString())
         behavior.addView(webField("空闲自动断连（分钟）", "0 = 不断开；超时无数据由 App 断开通道，不下发设备参数", idleMinutes))
         behavior.addView(webButton("保存断连设置", small = true) {
@@ -780,6 +784,7 @@ object Pages {
                 c.settings.terminator = "CR"
                 c.settings.autoConnect = true
                 c.settings.idleDisconnectMinutes = 0
+                c.settings.overLimitBeep = true
                 actions.toast("已恢复默认设置")
             }
         ))

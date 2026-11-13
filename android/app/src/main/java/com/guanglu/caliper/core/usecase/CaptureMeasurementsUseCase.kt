@@ -8,6 +8,7 @@ import com.guanglu.caliper.core.model.CaliperFrame
 import com.guanglu.caliper.core.model.MeasurementDraft
 import com.guanglu.caliper.core.model.Source
 import com.guanglu.caliper.core.model.Units
+import com.guanglu.caliper.core.model.isOverLimit
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -26,7 +27,7 @@ class CaptureMeasurementsUseCase(
     private val dao: MeasurementDao,
     private val settings: SettingsRepository,
     private val clocks: Clocks = Clocks(),
-    private val onStored: (Int) -> Unit = {},
+    private val onStored: (Int, Boolean) -> Unit = { _, _ -> },
     private val onDiagnostic: (String) -> Unit = {}
 ) {
     class Clocks(
@@ -91,7 +92,8 @@ class CaptureMeasurementsUseCase(
         }
         if (batch.isEmpty()) return
         val ids = dao.insertAll(batch)
-        withContext(Dispatchers.Main) { onStored(ids.size) }
+        val overLimit = batch.any { isOverLimit(it.verdict) }
+        withContext(Dispatchers.Main) { onStored(ids.size, overLimit) }
     }
 
     fun resetDebounce() = debouncer.clearAll()

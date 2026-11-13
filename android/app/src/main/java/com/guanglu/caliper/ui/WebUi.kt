@@ -20,6 +20,8 @@ import android.widget.TextView
 import com.guanglu.caliper.core.database.entity.Measurement
 import com.guanglu.caliper.core.model.ChannelPalette
 import com.guanglu.caliper.core.model.Units
+import com.guanglu.caliper.core.model.ValueTone
+import com.guanglu.caliper.core.model.valueToneOf
 import java.text.SimpleDateFormat
 import java.util.Date
 
@@ -573,6 +575,9 @@ fun Context.webTableHeader(): LinearLayout = LinearLayout(this).apply {
     )
 }
 
+/** 数值文字颜色：常规近黑，超差红色。 */
+internal fun valueTextColor(tone: ValueTone): Int = if (tone == ValueTone.OVER_LIMIT) Web.BAD else Web.TEXT
+
 fun Context.webTableRow(
     item: Measurement,
     clock: SimpleDateFormat,
@@ -586,7 +591,8 @@ fun Context.webTableRow(
         setOnClickListener { onClick() }
     }.also { row ->
         val ctx = this
-        val bad = item.verdict == "FAIL"
+        val tone = valueToneOf(item.verdict)
+        val bad = tone == ValueTone.OVER_LIMIT
         row.addView(
             View(ctx).apply { setBackgroundColor(if (bad) Web.BAD else Web.OK) },
             LinearLayout.LayoutParams(dp(3), LinearLayout.LayoutParams.MATCH_PARENT)
@@ -605,7 +611,7 @@ fun Context.webTableRow(
         }
         valueBox.addView(webChMark(item.channelNo))
         valueBox.addView(
-            label(Units.formatMm(item.valueUm10, decimals), 15f, true, if (bad) Web.BAD else Web.TEXT).apply {
+            label(Units.formatMm(item.valueUm10, decimals), 15f, true, valueTextColor(tone)).apply {
                 typeface = Typeface.MONOSPACE
             },
             LinearLayout.LayoutParams(

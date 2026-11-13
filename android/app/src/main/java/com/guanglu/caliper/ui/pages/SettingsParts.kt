@@ -174,3 +174,21 @@ private fun registrationFields(
     })
     box
 }
+
+/**
+ * 超差蜂鸣开关：新采集数据判定超差时响一声，可关闭。
+ *
+ * @author AI-Generated
+ */
+internal fun overLimitBeepField(
+    context: Context,
+    c: AppContainer,
+    actions: UiActions
+): LinearLayout = context.run {
+    val toggle = webSwitch(c.settings.overLimitBeep)
+    toggle.setOnCheckedChangeListener { _, checked ->
+        c.settings.overLimitBeep = checked
+        actions.toast(if (checked) "已开启超差蜂鸣：超差时响一声" else "已关闭超差蜂鸣")
+    }
+    webField("超差蜂鸣", "新数据判定超差时响一声；连续超差 1.5 秒内不重复", toggle)
+}

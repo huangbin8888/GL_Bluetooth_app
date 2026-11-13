@@ -11,6 +11,7 @@ import android.os.Handler
 import android.os.Looper
 import androidx.core.content.ContextCompat
 import androidx.core.location.LocationManagerCompat
+import com.guanglu.caliper.core.audio.OverLimitBeep
 import com.guanglu.caliper.core.bluetooth.BlessedTransport
 import com.guanglu.caliper.core.bluetooth.CommandQueue
 import com.guanglu.caliper.core.bluetooth.ScannedDevice
@@ -20,7 +21,9 @@ import com.guanglu.caliper.core.bluetooth.channel.ChannelManager
 import com.guanglu.caliper.core.bluetooth.device.CaliperCommand
 import com.guanglu.caliper.core.database.AppDatabase
 import com.guanglu.caliper.core.datastore.SettingsRepository
+import com.guanglu.caliper.core.model.BEEP_COOLDOWN_MS
 import com.guanglu.caliper.core.model.ChannelPalette
+import com.guanglu.caliper.core.model.shouldBeep
 import com.guanglu.caliper.core.usecase.BatchUseCase
 import com.guanglu.caliper.core.usecase.CaptureMeasurementsUseCase
 import com.guanglu.caliper.core.usecase.DeviceConfigUseCase
@@ -44,6 +47,8 @@ class AppContainer(context: Context) {
     val settings = SettingsRepository(context)
     val diagnostics = DiagnosticsUseCase(context)
     private val database = AppDatabase.build(context)
+    private val overLimitBeep = OverLimitBeep { diagnostics.log(it) }
+    private var lastBeepAt = 0L
 
     private val transport = BlessedTransport(
         context,
@@ -54,7 +59,10 @@ class AppContainer(context: Context) {
     val capture = CaptureMeasurementsUseCase(
         dao = database.measurementDao(),
         settings = settings,
-        onStored = { count -> diagnostics.log("STORE $count") },
+        onStored = { count, overLimit ->
+            diagnostics.log("STORE $count")
+            maybeBeep(overLimit)
+        },
         onDiagnostic = { diagnostics.log(it) }
     )
 
@@ -284,12 +292,21 @@ class AppContainer(context: Context) {
         }
     }
 
+    /** 新落库批次含超差数据时播放蜂鸣；开关与冷却由纯策略决定。 */
+    private fun maybeBeep(overLimit: Boolean) {
+        val now = System.currentTimeMillis()
+        if (!shouldBeep(overLimit, settings.overLimitBeep, now - lastBeepAt, BEEP_COOLDOWN_MS)) return
+        lastBeepAt = now
+        overLimitBeep.play()
+    }
+
     fun close() {
         mainHandler.removeCallbacks(idleRunnable)
         cancelAllReconnects()
         eventThrottle.clear()
         channelManager.close()
         capture.close()
+        overLimitBeep.close()
     }
 
     private fun handleChannelEvent(event: ChannelEvent) {

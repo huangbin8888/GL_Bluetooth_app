@@ -54,6 +54,11 @@ class SettingsRepository(context: Context) {
         get() = sp.getBoolean("auto_connect", true)
         set(value) = sp.edit().putBoolean("auto_connect", value).apply()
 
+    /** 新采集数据判定超差时播放蜂鸣。 */
+    var overLimitBeep: Boolean
+        get() = sp.getBoolean("over_limit_beep", true)
+        set(value) = sp.edit().putBoolean("over_limit_beep", value).apply()
+
     /** 空闲自动断连分钟数；0 表示不断开。 */
     var idleDisconnectMinutes: Int
         get() = sp.getInt("idle_disconnect_minutes", 0)
