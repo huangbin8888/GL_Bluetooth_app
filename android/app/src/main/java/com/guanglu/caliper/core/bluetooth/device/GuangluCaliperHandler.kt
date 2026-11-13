@@ -30,6 +30,16 @@ object GuangluCaliperHandler : CaliperDevice {
     fun matchesBroadcastName(name: String?, prefix: String = NAME_PREFIX): Boolean =
         !name.isNullOrBlank() && name.startsWith(prefix)
 
+    /** 扫描设备稳定标识：广播名带后缀时以广播名为准，否则回退规范化 MAC。 */
+    fun stableScanKey(name: String?, mac: String): String {
+        val normalized = name?.trim()?.uppercase().orEmpty()
+        return if (normalized.length > NAME_PREFIX.length && normalized.startsWith(NAME_PREFIX)) {
+            normalized
+        } else {
+            mac.trim().uppercase()
+        }
+    }
+
     /** 按帧头切分协议帧 */
     val FRAME_START_PATTERN = Regex(
         "DAT0:|DAT1:|MEAS:OK|MEAS:ERR|CLR:OK|CLR:ERR|MOD:OK|MOD:ERR|NAM:OK|NAM:ERR"

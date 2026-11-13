@@ -14,6 +14,7 @@ import androidx.core.location.LocationManagerCompat
 import com.guanglu.caliper.core.bluetooth.BlessedTransport
 import com.guanglu.caliper.core.bluetooth.CommandQueue
 import com.guanglu.caliper.core.bluetooth.ScannedDevice
+import com.guanglu.caliper.core.bluetooth.ScanRegistry
 import com.guanglu.caliper.core.bluetooth.channel.ChannelEvent
 import com.guanglu.caliper.core.bluetooth.channel.ChannelManager
 import com.guanglu.caliper.core.bluetooth.device.CaliperCommand
@@ -72,8 +73,32 @@ class AppContainer(context: Context) {
     )
 
     // ---- UI 门面 ----
-    fun startScan(onDevice: (ScannedDevice) -> Unit) = channelManager.startScan(onDevice)
+    private val scanRegistry = ScanRegistry()
+    private val continuousModes = ConcurrentHashMap<Int, Boolean>()
+
+    fun isContinuous(channelNo: Int): Boolean = continuousModes[channelNo] == true
+    fun setContinuous(channelNo: Int, enabled: Boolean) {
+        continuousModes[channelNo] = enabled
+    }
+
+    fun clearContinuous(channelNo: Int) {
+        continuousModes.remove(channelNo)
+    }
+
+    /** 扫描设备；按稳定设备标识合并重复广播，转发给界面的均为唯一设备。 */
+    fun startScan(onDevice: (ScannedDevice) -> Unit) {
+        scanRegistry.clear()
+        channelManager.startScan { device ->
+            if (scanRegistry.add(device)) {
+                onDevice(device)
+            } else {
+                diagnostics.log("SCAN_DEDUP ${device.mac} ${device.identity}")
+            }
+        }
+    }
+
     fun stopScan() = channelManager.stopScan()
+    fun scanDedupCount(): Int = scanRegistry.mergedCount
     fun connect(mac: String): Boolean {
         resetReconnect(mac)
         return channelManager.requestConnect(mac)
@@ -262,6 +287,7 @@ class AppContainer(context: Context) {
                 uiEvent("CH${event.channelNo} 已连接 ${event.mac}")
             }
             is ChannelEvent.Disconnected -> {
+                clearContinuous(event.channelNo)
                 if (eventThrottle.allow("disconnect:${event.mac}")) {
                     uiEvent("CH${event.channelNo} 断开：${event.reason}")
                 }
@@ -280,10 +306,13 @@ class AppContainer(context: Context) {
                 if (event.ok && event.name.isNotBlank()) {
                     deviceConfig.renameDevice(event.mac, event.name)
                 }
-                uiEvent(
-                    if (event.ok) "CH${event.channelNo} 改名成功：${event.name}，可能需重连生效"
-                    else "CH${event.channelNo} 改名失败（设备回 ERR）"
-                )
+                diagnostics.log("NAM_RESULT ${event.mac} ${event.name} ok=${event.ok} ${event.reason}")
+                if (eventThrottle.allow("nam:${event.mac}")) {
+                    uiEvent(
+                        if (event.ok) "CH${event.channelNo} 改名成功：${event.name}，可能需重连生效"
+                        else "CH${event.channelNo} 改名失败：${event.reason.ifBlank { "设备回 ERR" }}"
+                    )
+                }
             }
         }
     }

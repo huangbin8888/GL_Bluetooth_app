@@ -1,11 +1,11 @@
 package com.guanglu.caliper.ui.pages
 
 import android.content.Context
+import android.widget.ArrayAdapter
 import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.Spinner
 import com.guanglu.caliper.AppContainer
-import com.guanglu.caliper.core.model.ChannelPalette
 import com.guanglu.caliper.ui.WebTone
 import com.guanglu.caliper.ui.webBanner
 import com.guanglu.caliper.ui.webBtnRow
@@ -37,34 +37,72 @@ internal fun settingsBluetoothCard(
             "接口文档只定义 NAM 改广播名；Android 第三方 App 无法配置卡尺 HID 键盘模式参数。",
         WebTone.WARN
     ))
-    val target = webSpinner((1..ChannelPalette.MAX_CHANNELS).map { "CH$it" })
+    val labels = mutableListOf<String>()
+    val adapter = ArrayAdapter(context, android.R.layout.simple_spinner_item, labels)
+    adapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
+    val target = webSpinner(listOf<String>())
+    target.adapter = adapter
+    val channelNumbers = mutableListOf<Int>()
     val nameInput = webEdit("GL-BLE#0187")
-    card.addView(webField("目标卡尺", "按通道 / MAC 绑定", target))
+
+    fun refreshChannels(): Int {
+        channelNumbers.clear()
+        labels.clear()
+        val slots = c.channelSlots()
+        slots.keys.sorted().forEach { no ->
+            channelNumbers.add(no)
+            labels.add("CH$no · ${slots[no]?.takeLast(4) ?: "—"}")
+        }
+        if (labels.isEmpty()) labels.add("无在线通道")
+        adapter.notifyDataSetChanged()
+        return channelNumbers.size
+    }
+    refreshChannels()
+
+    card.addView(webField("目标卡尺", "只列在线通道 · CH / MAC 后四位", target))
+    card.addView(webBtnRow(webButton("刷新在线通道", small = true) {
+        val count = refreshChannels()
+        actions.toast(
+            if (count == 0) "当前无在线通道，请先在「连接」页连接卡尺" else "已刷新，在线 $count 个通道"
+        )
+    }))
     card.addView(webField("修改蓝牙名称", "NAM:<string> · ≤16 字符", nameInput))
-    card.addView(namActionRow(context, c, actions, target, nameInput))
-    card.addView(registrationFields(context, c, actions, target, nameInput))
+    card.addView(namActionRow(context, c, actions, target, nameInput, channelNumbers))
+    card.addView(registrationFields(context, c, actions, target, nameInput, channelNumbers))
     card
 }
+
+/** 下拉位置对应的真实通道号；无在线通道时返回 null。 */
+internal fun channelAtPosition(numbers: List<Int>, position: Int): Int? = numbers.getOrNull(position)
+
+private fun selectedChannel(target: Spinner, numbers: List<Int>): Int? =
+    channelAtPosition(numbers, target.selectedItemPosition)
 
 private fun namActionRow(
     context: Context,
     c: AppContainer,
     actions: UiActions,
     target: Spinner,
-    nameInput: EditText
+    nameInput: EditText,
+    numbers: List<Int>
 ): LinearLayout = context.run {
     webBtnRow(
         webButton("下发改名（NAM）", small = true) {
-            val channelNo = target.selectedItemPosition + 1
-            val ok = c.applyNam(channelNo, nameInput.text.toString())
-            actions.toast(
-                if (ok) "改名指令已写入 CH$channelNo，等待设备回包"
-                else "名称非法（须保留 GL-BLE# 前缀、总长 8–16）或该通道未连接"
-            )
+            val channelNo = selectedChannel(target, numbers)
+            if (channelNo == null) {
+                actions.toast("当前无在线通道，请先在「连接」页连接卡尺")
+                return@webButton
+            }
+            val name = nameInput.text.toString()
+            if (!c.applyNam(channelNo, name)) {
+                actions.toast("名称非法（须保留 GL-BLE# 前缀、总长 8–16）或 CH$channelNo 已断开")
+                return@webButton
+            }
+            actions.toast("改名指令已写入 CH$channelNo，等待设备回包；3 秒无回包会提示")
         },
         webButton("读取当前名称", small = true) {
-            val channelNo = target.selectedItemPosition + 1
-            val mac = c.channelSlots()[channelNo] ?: c.settings.lastMac
+            val channelNo = selectedChannel(target, numbers)
+            val mac = channelNo?.let { c.channelSlots()[it] } ?: c.settings.lastMac
             if (mac == null) {
                 actions.toast("该通道未连接且无历史设备，无法读取登记名")
                 return@webButton
@@ -88,7 +126,8 @@ private fun registrationFields(
     c: AppContainer,
     actions: UiActions,
     target: Spinner,
-    nameInput: EditText
+    nameInput: EditText,
+    numbers: List<Int>
 ): LinearLayout = context.run {
     val box = LinearLayout(context).apply { orientation = LinearLayout.VERTICAL }
     val autoEmit = webEdit("30")
@@ -104,7 +143,7 @@ private fun registrationFields(
     box.addView(webField("HID 键盘录入", "数值注入这里并落库", hidInput))
     box.addView(webBtnRow(
         webButton("保存登记（不下发）", small = true) {
-            val channelNo = target.selectedItemPosition + 1
+            val channelNo = selectedChannel(target, numbers) ?: 1
             val mac = c.channelSlots()[channelNo] ?: c.settings.lastMac
             if (mac == null) {
                 actions.toast("该通道未连接且无历史设备，未登记")
@@ -128,7 +167,7 @@ private fun registrationFields(
         }
     ))
     box.addView(webButton("HID 录入落库", small = true) {
-        val channelNo = target.selectedItemPosition + 1
+        val channelNo = selectedChannel(target, numbers) ?: 1
         val mac = c.channelSlots()[channelNo] ?: (c.settings.lastMac ?: "HID")
         val accepted = c.hid.submit(channelNo, mac, hidInput.text.toString())
         actions.toast("HID 录入 $accepted 条，走同一条解析 → 去抖 → 落库链路")

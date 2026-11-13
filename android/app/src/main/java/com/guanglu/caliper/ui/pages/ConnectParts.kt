@@ -65,6 +65,7 @@ internal fun scanTimeout(
     countProvider: () -> Int,
     hint: TextView,
     actions: UiActions,
+    dedupProvider: () -> Int = { 0 },
     onDone: () -> Unit
 ): Runnable = Runnable {
     c.stopScan()
@@ -73,9 +74,12 @@ internal fun scanTimeout(
         hint.text = "10 秒未发现卡尺：确认卡尺已开机、长按 data 键 3 秒且液晶显示 OK；可在 P4 导出诊断日志查看 SCAN_SKIP"
         actions.toast("未发现卡尺，请查看连接页提示")
     } else {
-        hint.text = "发现 ${countProvider()} 台，点设备名连接"
+        hint.text = "发现 ${countProvider()} 台，点设备名连接" + dedupSuffix(dedupProvider())
     }
 }
+
+internal fun dedupSuffix(merged: Int): String =
+    if (merged > 0) "（已合并 $merged 次重复广播）" else ""
 
 internal fun stopScanOnDetach(page: View, onDetach: () -> Unit) {
     page.addOnAttachStateChangeListener(object : View.OnAttachStateChangeListener {
@@ -153,10 +157,17 @@ internal class ScanSession(
             handler.post {
                 registry.add(device)
                 rebuild()
-                hint.text = "发现 ${registry.size} 台卡尺，点设备名连接"
+                hint.text = "发现 ${registry.size} 台卡尺，点设备名连接" +
+                    dedupSuffix(c.scanDedupCount() + registry.mergedCount)
             }
         }
-        val timeout = scanTimeout(c, { registry.size }, hint, actions) { pendingTimeout = null }
+        val timeout = scanTimeout(
+            c,
+            { registry.size },
+            hint,
+            actions,
+            { c.scanDedupCount() + registry.mergedCount }
+        ) { pendingTimeout = null }
         pendingTimeout = timeout
         handler.postDelayed(timeout, SCAN_TIMEOUT_MS)
     }

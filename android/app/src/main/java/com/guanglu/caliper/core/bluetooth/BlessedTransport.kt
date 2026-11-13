@@ -31,6 +31,7 @@ class BlessedTransport(
     private val mainHandler = Handler(Looper.getMainLooper())
     private val peripherals = ConcurrentHashMap<String, BluetoothPeripheral>()
     private val callbacks = ConcurrentHashMap<String, BleConnectionCallback>()
+    private val seenInScan = ConcurrentHashMap<String, String>()
 
     @Volatile
     private var onDevice: (ScannedDevice) -> Unit = {}
@@ -44,8 +45,15 @@ class BlessedTransport(
                 onDiagnostic("SCAN_SKIP ${peripheral.address} cached=$cachedName advertised=$advertisedName")
                 return
             }
-            onDiagnostic("SCAN_HIT ${peripheral.address} name=$name rssi=${scanResult.rssi}")
-            onDevice(ScannedDevice(peripheral.address, name, scanResult.rssi))
+            val macKey = peripheral.address.trim().uppercase()
+            val previousName = seenInScan.put(macKey, name)
+            if (previousName == name) {
+                onDiagnostic("SCAN_DEDUP $macKey name=$name")
+                return
+            }
+            val identity = GuangluCaliperHandler.stableScanKey(name, peripheral.address)
+            onDiagnostic("SCAN_HIT $macKey name=$name identity=$identity rssi=${scanResult.rssi}")
+            onDevice(ScannedDevice(peripheral.address, name, scanResult.rssi, identity))
         }
 
         override fun onConnectedPeripheral(peripheral: BluetoothPeripheral) {
@@ -122,6 +130,7 @@ class BlessedTransport(
     private val central = BluetoothCentralManager(appContext, centralCallback, mainHandler)
 
     override fun startScan(onDevice: (ScannedDevice) -> Unit) {
+        seenInScan.clear()
         this.onDevice = onDevice
         onDiagnostic("SCAN_START")
         central.scanForPeripherals()

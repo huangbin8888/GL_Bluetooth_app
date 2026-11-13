@@ -5,7 +5,12 @@ package com.guanglu.caliper.core.bluetooth
  *
  * @author AI-Generated
  */
-data class ScannedDevice(val mac: String, val name: String, val rssi: Int)
+data class ScannedDevice(
+    val mac: String,
+    val name: String,
+    val rssi: Int,
+    val identity: String = mac.trim().uppercase()
+)
 
 interface BleConnectionCallback {
     fun onReady(mac: String)

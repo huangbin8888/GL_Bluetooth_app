@@ -296,25 +296,68 @@ object Pages {
                 else "内部统一存 0.1 微米整数，inch 显示放 V2"
             )
         }
-        var continuous = false
+        val targetHost = LinearLayout(context).apply { orientation = LinearLayout.VERTICAL }
+        val targetHint = webTiny("命令目标：无在线通道")
         val modeButton = webButton("切换为连续") {}
+        var selected = 0
+
+        fun onlineChannels(): List<Int> = c.channelSlots().keys.sorted()
+
+        fun renderTarget() {
+            val online = onlineChannels()
+            if (selected !in online) selected = online.firstOrNull() ?: 0
+            targetHost.removeAllViews()
+            val chips: List<View> = if (online.isEmpty()) {
+                listOf(webChip("无在线通道", WebTone.WARN))
+            } else {
+                online.map { no ->
+                    webChChip("CH$no", ChannelPalette.colorOf(no), no == selected) {
+                        selected = no
+                        renderTarget()
+                    }
+                }
+            }
+            targetHost.addView(webChipFlow(chips))
+            targetHint.text = if (selected == 0) {
+                "命令目标：无在线通道，MEAS / CLR / 模式均不下发"
+            } else {
+                "命令目标：CH$selected（${c.channelSlots()[selected]?.takeLast(4) ?: "—"}）· " +
+                    if (c.isContinuous(selected)) "连续" else "手动"
+            }
+            modeButton.text = if (c.isContinuous(selected)) "切换为手动" else "切换为连续"
+        }
 
         fun send(command: CaliperCommand, label: String): Boolean {
-            val ok = c.sendCommand(1, command)
-            if (!ok) actions.toast("CH1 未连接卡尺，$label 未下发；请先到「连接」页连接")
+            val online = onlineChannels()
+            if (selected !in online) {
+                selected = online.firstOrNull() ?: 0
+                renderTarget()
+            }
+            if (selected == 0) {
+                actions.toast("当前无在线通道，请先到「连接」页连接卡尺")
+                return false
+            }
+            val ok = c.sendCommand(selected, command)
+            if (!ok) actions.toast("CH$selected 未连接卡尺，$label 未下发（只影响该通道）")
             return ok
         }
 
+        renderTarget()
         modeButton.setOnClickListener {
-            val target = if (continuous) CaliperCommand.MOD_MANUAL else CaliperCommand.MOD_CONTINUOUS
+            val channelNo = selected
+            val wantContinuous = !c.isContinuous(channelNo)
+            val target = if (wantContinuous) CaliperCommand.MOD_CONTINUOUS else CaliperCommand.MOD_MANUAL
             if (send(target, "模式切换")) {
-                continuous = !continuous
-                modeButton.text = if (continuous) "切换为手动" else "切换为连续"
+                c.setContinuous(channelNo, wantContinuous)
+                renderTarget()
+                actions.toast("CH$channelNo 已切为${if (wantContinuous) "连续" else "手动"}，其他通道不受影响")
             }
         }
         listOf(
             seg,
-            webButton("记录一条（主通道）", primary = true) {
+            targetHint,
+            targetHost,
+            webButton("记录一条（当前通道）", primary = true) {
                 send(CaliperCommand.MEAS, "记录一条")
             },
             webBtnRow(

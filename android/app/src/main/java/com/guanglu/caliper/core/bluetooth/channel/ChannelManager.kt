@@ -15,6 +15,7 @@ import java.util.concurrent.ConcurrentHashMap
 import kotlin.concurrent.schedule
 
 private const val CONNECT_TIMEOUT_MS = 15_000L
+internal const val NAM_TIMEOUT_MS = 3_000L
 
 sealed class ChannelEvent {
     data class Connected(val channelNo: Int, val mac: String) : ChannelEvent()
@@ -22,7 +23,13 @@ sealed class ChannelEvent {
     data class Rejected(val mac: String, val reason: String) : ChannelEvent()
     data class LimitReached(val actual: Int) : ChannelEvent()
     data class Ack(val channelNo: Int, val command: String, val ok: Boolean) : ChannelEvent()
-    data class NamResult(val channelNo: Int, val mac: String, val name: String, val ok: Boolean) : ChannelEvent()
+    data class NamResult(
+        val channelNo: Int,
+        val mac: String,
+        val name: String,
+        val ok: Boolean,
+        val reason: String = ""
+    ) : ChannelEvent()
 }
 
 /**
@@ -38,6 +45,7 @@ class ChannelManager(
     private val onEvent: (ChannelEvent) -> Unit = {},
     private val onDiagnostic: (String) -> Unit = {},
     private val connectTimeoutMs: Long = CONNECT_TIMEOUT_MS,
+    private val namTimeoutMs: Long = NAM_TIMEOUT_MS,
     private val clock: () -> Long = { System.currentTimeMillis() }
 ) : BleConnectionCallback {
 
@@ -47,6 +55,7 @@ class ChannelManager(
     private val lastCommand = ConcurrentHashMap<String, ByteArray>()
     private val retryCount = ConcurrentHashMap<String, Int>()
     private val connectTimers = ConcurrentHashMap<String, TimerTask>()
+    private val namTimers = ConcurrentHashMap<String, TimerTask>()
     private val lastActivity = ConcurrentHashMap<String, Long>()
     private val pendingNam = ConcurrentHashMap<String, String>()
     private val retryTimer = Timer("cmd-retry", true)
@@ -145,15 +154,48 @@ class ChannelManager(
         return true
     }
 
-    /** 对指定通道下发 NAM 名称。 */
+    /** 对指定通道下发 NAM 名称，写入失败与回包超时都给出明确结果。 */
     fun applyNam(channelNo: Int, name: String): Boolean {
         val mac = allocator.macOf(channelNo) ?: return false
         if (!GuangluCaliperHandler.validateNam(name)) return false
         val bytes = GuangluCaliperHandler.buildNamCommand(name)
         pendingNam[mac] = name
-        commandQueue.submit(mac, bytes)
+        commandQueue.submit(mac, bytes) { ok ->
+            if (!ok) failNam(mac, channelNo, name, "写入失败（通道未连接或特征不可写）")
+        }
         onDiagnostic("TX CH$channelNo $mac ${String(bytes, Charsets.US_ASCII)}")
+        scheduleNamTimeout(mac, channelNo, name)
         return true
+    }
+
+    private fun scheduleNamTimeout(mac: String, channelNo: Int, name: String) {
+        namTimers.remove(mac)?.cancel()
+        namTimers[mac] = retryTimer.schedule(namTimeoutMs) {
+            if (pendingNam.remove(mac) == null) return@schedule
+            namTimers.remove(mac)
+            onDiagnostic("NAM_TIMEOUT $mac")
+            onEvent(
+                ChannelEvent.NamResult(
+                    channelNo,
+                    mac,
+                    name,
+                    false,
+                    "设备未回 NAM 回包（${namTimeoutMs / 1000} 秒超时）"
+                )
+            )
+        }
+    }
+
+    private fun failNam(mac: String, channelNo: Int, name: String, cause: String) {
+        if (pendingNam.remove(mac) == null) return
+        namTimers.remove(mac)?.cancel()
+        onDiagnostic("NAM_FAIL $mac $cause")
+        onEvent(ChannelEvent.NamResult(channelNo, mac, name, false, cause))
+    }
+
+    private fun clearNam(mac: String) {
+        pendingNam.remove(mac)
+        namTimers.remove(mac)?.cancel()
     }
 
     @Synchronized
@@ -165,6 +207,7 @@ class ChannelManager(
         val slot = allocator.release(mac) ?: 0
         slots.remove(mac)
         commandQueue.cancelFor(mac)
+        clearNam(mac)
         lastCommand.remove(mac)
         lastActivity.remove(mac)
         onEvent(ChannelEvent.Disconnected(slot, mac, reason))
@@ -185,6 +228,8 @@ class ChannelManager(
     fun close() {
         connectTimers.values.forEach { it.cancel() }
         connectTimers.clear()
+        namTimers.values.forEach { it.cancel() }
+        namTimers.clear()
         retryTimer.cancel()
         pendingConnections.clear()
         connectingMac = null
@@ -226,6 +271,7 @@ class ChannelManager(
         val slotNo = allocator.release(mac) ?: 0
         slots.remove(mac)
         commandQueue.cancelFor(mac)
+        clearNam(mac)
         lastCommand.remove(mac)
         onEvent(ChannelEvent.Disconnected(slotNo, mac, reason))
         pumpConnections()
@@ -236,6 +282,7 @@ class ChannelManager(
         val slotNo = allocator.release(mac) ?: 0
         slots.remove(mac)
         commandQueue.cancelFor(mac)
+        clearNam(mac)
         connectingMac = null
         onDiagnostic("CONNECT_FAIL $mac $reason")
         // 错误指向资源耗尽时下调机型上限。
@@ -272,7 +319,14 @@ class ChannelManager(
             val channelNo = allocator.slotOf(mac) ?: return
             if (frame.command == GuangluCaliperHandler.COMMAND_NAM) {
                 val name = pendingNam.remove(mac).orEmpty()
-                onEvent(ChannelEvent.NamResult(channelNo, mac, name, frame.ok))
+                namTimers.remove(mac)?.cancel()
+                val ok = frame.ok && name.isNotEmpty()
+                val reason = when {
+                    name.isEmpty() -> "收到 NAM 回包但无待处理改名"
+                    frame.ok -> "设备回 NAM:OK"
+                    else -> "设备回 NAM:ERR"
+                }
+                onEvent(ChannelEvent.NamResult(channelNo, mac, name, ok, reason))
                 return
             }
             onEvent(ChannelEvent.Ack(channelNo, frame.command, frame.ok))
