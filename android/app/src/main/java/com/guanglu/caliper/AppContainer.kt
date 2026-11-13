@@ -246,6 +246,20 @@ class AppContainer(context: Context) {
 
     fun measurements() = database.measurementDao().observeAll()
 
+    /** 清空全部检测记录；Room Flow 会刷新表格与统计，回调带回删除行数。 */
+    fun clearMeasurements(onCleared: (Int) -> Unit) {
+        scope.launch {
+            val result = runCatching { database.measurementDao().clearAll() }
+            result.onSuccess { count ->
+                diagnostics.log("CLEAR_DATA $count")
+                mainHandler.post { onCleared(count) }
+            }.onFailure { error ->
+                diagnostics.log("CLEAR_DATA_FAIL ${error.javaClass.simpleName}")
+                mainHandler.post { uiEvent("清除失败：${error.message ?: "数据库异常"}，请重试") }
+            }
+        }
+    }
+
     fun exportCsv(uri: Uri, channelNo: Int? = null) {
         scope.launch {
             val report = io.exportCsv(uri, channelNo)

@@ -3,7 +3,9 @@ package com.guanglu.caliper.ui.pages
 import android.content.Context
 import android.graphics.Bitmap
 import android.view.Gravity
+import android.view.MotionEvent
 import android.view.View
+import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
@@ -41,7 +43,6 @@ object Pages {
     private const val TEMPLATE_COLUMNS =
         "16 列：DATE / TIME / SEQ / BATCH / ITEM / NOMINAL / LOWER_TOL / UPPER_TOL / " +
             "VALUE_MM / RAW_VALUE / RAW_UNIT / VERDICT / SOURCE / DEVICE_MAC / CHANNEL / NOTE"
-    private const val MAX_ROWS = 50
     private val CLOCK = SimpleDateFormat("HH:mm:ss", Locale.CHINA)
 
     fun build(context: Context, pageId: String, c: AppContainer, actions: UiActions): View =
@@ -66,7 +67,15 @@ object Pages {
     private fun even(context: Context, weight: Float = 1f): LinearLayout.LayoutParams =
         LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, weight)
 
-    private class LiveTable(val card: LinearLayout, val body: LinearLayout, val scope: TextView)
+    private class LiveTable(
+        val card: LinearLayout,
+        val body: LinearLayout,
+        val scope: TextView,
+        val frame: ScrollView,
+        val clearButton: TextView
+    ) {
+        var restoreScroll: Runnable? = null
+    }
 
     private fun liveTable(context: Context): LiveTable = context.run {
         val card = LinearLayout(context).apply {
@@ -88,10 +97,16 @@ object Pages {
             layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
         }
         caption.addView(webBold("实时检测 / 检测记录", 12.5f))
-        caption.addView(webTiny("同一界面 · 每来一帧立即追加一行"))
+        caption.addView(webTiny("同一界面 · 表格框内上下拖动查看"))
         head.addView(caption)
         val scope = webChip("全部通道", WebTone.BLUE)
         head.addView(scope)
+        val clearButton = webButton("清除数据", danger = true, small = true) {}
+        clearButton.setPadding(dp(8), dp(4), dp(8), dp(4))
+        head.addView(clearButton, LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.WRAP_CONTENT,
+            LinearLayout.LayoutParams.WRAP_CONTENT
+        ).apply { marginStart = dp(6) })
         card.addView(head)
         card.addView(View(context).apply {
             setBackgroundColor(Web.LINE)
@@ -99,12 +114,73 @@ object Pages {
         })
         card.addView(webTableHeader())
         val body = LinearLayout(context).apply { orientation = LinearLayout.VERTICAL }
-        card.addView(body)
+        val frame = ScrollView(context).apply {
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                dp(tableFrameHeightDp(0))
+            )
+            background = webDrawable(Web.CARD, dp(8).toFloat(), Web.LINE, 1)
+            isVerticalScrollBarEnabled = true
+            isFillViewport = true
+            enableInnerScroll()
+        }
+        frame.addView(body, FrameLayout.LayoutParams(
+            FrameLayout.LayoutParams.MATCH_PARENT,
+            FrameLayout.LayoutParams.WRAP_CONTENT
+        ))
+        card.addView(frame)
         val footer = webTiny("只保留 时间 + 数值 两列 · 通道用行内色标、判定用左侧色条、备注点行查看")
         footer.setBackgroundColor(Web.TABLE_HEAD)
         footer.setPadding(dp(10), dp(8), dp(10), dp(8))
         card.addView(footer)
-        LiveTable(card, body, scope)
+        LiveTable(card, body, scope, frame, clearButton)
+    }
+
+    private fun ScrollView.enableInnerScroll() {
+        var downY = 0f
+        setOnTouchListener { view, event ->
+            when (event.actionMasked) {
+                MotionEvent.ACTION_DOWN -> {
+                    downY = event.y
+                    view.parent.requestDisallowInterceptTouchEvent(true)
+                }
+                MotionEvent.ACTION_MOVE -> {
+                    val dy = downY - event.y
+                    val canScroll = if (dy > 0) view.canScrollVertically(1) else view.canScrollVertically(-1)
+                    view.parent.requestDisallowInterceptTouchEvent(canScroll)
+                }
+                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL ->
+                    view.parent.requestDisallowInterceptTouchEvent(false)
+            }
+            false
+        }
+    }
+
+    private fun bindClearButton(c: AppContainer, actions: UiActions, table: LiveTable) {
+        val confirm = ClearConfirm()
+        val resetLabel = Runnable {
+            confirm.reset()
+            table.clearButton.text = "清除数据"
+        }
+        table.clearButton.addOnAttachStateChangeListener(object : View.OnAttachStateChangeListener {
+            override fun onViewAttachedToWindow(v: View) = Unit
+            override fun onViewDetachedFromWindow(v: View) {
+                v.removeCallbacks(resetLabel)
+            }
+        })
+        table.clearButton.setOnClickListener {
+            if (confirm.tap(System.currentTimeMillis())) {
+                table.clearButton.removeCallbacks(resetLabel)
+                table.clearButton.text = "清除数据"
+                c.clearMeasurements { count -> actions.toast("已清除 $count 条检测记录") }
+                table.frame.scrollTo(0, 0)
+            } else {
+                table.clearButton.text = "再点一次确认"
+                actions.toast("3 秒内再点一次「清除数据」将删除全部检测记录（不可恢复）")
+                table.clearButton.removeCallbacks(resetLabel)
+                table.clearButton.postDelayed(resetLabel, CLEAR_CONFIRM_WINDOW_MS)
+            }
+        }
     }
 
     private fun channelChips(context: Context, focus: Int, onPick: (Int) -> Unit): List<View> = context.run {
@@ -204,6 +280,7 @@ object Pages {
         col.addView(chipHost)
         val table = liveTable(context)
         col.addView(table.card)
+        bindClearButton(c, actions, table)
 
         val total = webStat("0", "总记录")
         val ok = webStat("0", "合格")
@@ -219,19 +296,7 @@ object Pages {
         fun renderTable() {
             val shown = if (focus == 0) latest else latest.filter { it.channelNo == focus }
             table.scope.text = if (focus == 0) "全部通道" else "CH$focus"
-            table.body.removeAllViews()
-            if (shown.isEmpty()) {
-                table.body.addView(webTableEmpty("该通道暂无数据"))
-                return
-            }
-            shown.take(MAX_ROWS).forEach { item ->
-                table.body.addView(webTableRow(item, CLOCK, c.settings.decimals) {
-                    val detail = "CH${item.channelNo} · ${Units.formatMm(item.valueUm10, c.settings.decimals)}mm · " +
-                        "${item.source} · ${item.note}"
-                    actions.toast(detail)
-                })
-                table.body.addView(webDivider())
-            }
+            renderTableRows(context, table, shown, c.settings.decimals, actions)
         }
         fun renderChips() {
             chipHost.removeAllViews()
@@ -251,11 +316,41 @@ object Pages {
                 (total.getChildAt(0) as TextView).text = "${items.size}"
                 (ok.getChildAt(0) as TextView).text = "${items.count { it.verdict == "PASS" }}"
                 (bad.getChildAt(0) as TextView).text = "${items.count { it.verdict == "FAIL" }}"
-                items.firstOrNull()?.let { setReading(reading, Units.formatMm(it.valueUm10, c.settings.decimals)) }
+                val latestValue = items.firstOrNull()?.let {
+                    Units.formatMm(it.valueUm10, c.settings.decimals)
+                } ?: "—"
+                setReading(reading, latestValue)
             }
         }
         page.tag = job
         page
+    }
+
+    private fun renderTableRows(
+        context: Context,
+        table: LiveTable,
+        shown: List<Measurement>,
+        decimals: Int,
+        actions: UiActions
+    ) {
+        val anchor = if (shown.isEmpty()) 0 else table.frame.scrollY
+        table.body.removeAllViews()
+        if (shown.isEmpty()) {
+            table.body.addView(context.webTableEmpty("该通道暂无数据"))
+        } else {
+            shown.take(visibleRows(shown.size)).forEach { item ->
+                table.body.addView(context.webTableRow(item, CLOCK, decimals) {
+                    val detail = "CH${item.channelNo} · ${Units.formatMm(item.valueUm10, decimals)}mm · " +
+                        "${item.source} · ${item.note}"
+                    actions.toast(detail)
+                })
+                table.body.addView(context.webDivider())
+            }
+        }
+        table.restoreScroll?.let { table.frame.removeCallbacks(it) }
+        val restore = Runnable { table.frame.scrollTo(0, anchor) }
+        table.restoreScroll = restore
+        table.frame.post(restore)
     }
 
     private fun captureBatchCard(

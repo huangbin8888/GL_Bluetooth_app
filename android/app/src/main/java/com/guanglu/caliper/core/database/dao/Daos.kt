@@ -43,6 +43,10 @@ interface MeasurementDao {
     @Query("DELETE FROM measurement WHERE id = :id")
     suspend fun delete(id: Long)
 
+    /** 清空全部测量记录并返回删除行数。 */
+    @Query("DELETE FROM measurement")
+    suspend fun clearAll(): Int
+
     @Query("SELECT * FROM measurement WHERE channel_no = :channelNo ORDER BY elapsed_realtime DESC LIMIT 1")
     suspend fun latestOfChannel(channelNo: Int): Measurement?
 }
