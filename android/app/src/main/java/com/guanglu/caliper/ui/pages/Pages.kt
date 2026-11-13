@@ -2,15 +2,10 @@ package com.guanglu.caliper.ui.pages
 
 import android.content.Context
 import android.graphics.Bitmap
-import android.os.Handler
-import android.os.Looper
 import android.view.Gravity
 import android.view.View
-import android.widget.ArrayAdapter
-import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.ScrollView
-import android.widget.Spinner
 import android.widget.TextView
 import com.guanglu.caliper.AppContainer
 import com.guanglu.caliper.core.bluetooth.ScannedDevice
@@ -71,21 +66,6 @@ object Pages {
     private fun even(context: Context, weight: Float = 1f): LinearLayout.LayoutParams =
         LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, weight)
 
-    private fun Context.edit(initial: String): EditText = EditText(this).apply {
-        setText(initial)
-        setSingleLine(true)
-        textSize = 12.5f
-        gravity = Gravity.END or Gravity.CENTER_VERTICAL
-        background = webDrawable(Web.FILE_BG, dp(8).toFloat(), Web.LINE, 1)
-        setPadding(dp(8), 0, dp(8), 0)
-        layoutParams = LinearLayout.LayoutParams(dp(112), dp(34))
-    }
-
-    private fun Context.selector(items: List<String>): Spinner = Spinner(this).apply {
-        adapter = ArrayAdapter(context, android.R.layout.simple_spinner_item, items)
-        layoutParams = LinearLayout.LayoutParams(dp(112), dp(34))
-    }
-
     private class LiveTable(val card: LinearLayout, val body: LinearLayout, val scope: TextView)
 
     private fun liveTable(context: Context): LiveTable = context.run {
@@ -140,7 +120,17 @@ object Pages {
         val page = screen(context)
         val col = page.col()
         val state = webBold("已连接 0 / 7 通道", 13f)
-        col.addView(connectHeader(context, state))
+        val note = webTiny(
+            if (c.settings.autoConnect) "启动时自动重连上次连接过的卡尺" else "自动重连已关闭（设置 · 采集行为可开启）"
+        )
+        col.addView(connectHeader(context, state, note))
+        CoroutineScope(Dispatchers.Main).launch {
+            val registered = c.deviceConfig.recentDevices(ChannelPalette.MAX_CHANNELS)
+            if (registered.isNotEmpty()) {
+                note.text = "已登记 ${registered.size} 台卡尺" +
+                    if (c.settings.autoConnect) " · 启动时自动重连" else " · 自动重连已关闭"
+            }
+        }
         col.addView(webBanner("长按卡尺红色 data 键 3 秒，液晶闪 OK 后开始扫描。\n最多同时连接 7 台，第 8 台扫描到也不连接并提示通道已满。", WebTone.BLUE))
         col.addView(webBanner("蓝牙 / 定位权限未确认，或系统定位总开关关闭时扫描不到设备。", WebTone.WARN))
         col.addView(webBtnRow(webButton("去系统设置", small = true) { actions.openSystemSettings() }))
@@ -157,48 +147,17 @@ object Pages {
         val slotLabels = mutableListOf<TextView>()
         col.addView(channelSlotsCard(context, slotLabels))
 
-        val handler = Handler(Looper.getMainLooper())
-        var pendingTimeout: Runnable? = null
-        fun stopScan() {
-            pendingTimeout?.let { handler.removeCallbacks(it) }
-            pendingTimeout = null
-            c.stopScan()
-        }
-        stopScanOnDetach(page) { stopScan() }
+        val session = ScanSession(c, actions, found, list, hint) { refreshConnect(c, state, slotLabels) }
+        stopScanOnDetach(page) { session.stop() }
         col.addView(webBtnRow(
-            webButton("扫描设备", primary = true) {
-                val reason = c.scanReadiness()
-                if (reason != null) {
-                    actions.toast(reason)
-                    hint.text = reason
-                    return@webButton
-                }
-                stopScan()
+            webButton("扫描设备", primary = true) { session.start() },
+            webButton("全部断开", danger = true) {
+                val count = c.disconnectAll()
                 found.clear()
                 list.removeAllViews()
-                hint.text = "正在扫描… 长按卡尺 data 键 3 秒后等待广播"
-                actions.toast("开始扫描 GL-BLE# 卡尺")
-                c.startScan { device ->
-                    handler.post {
-                        if (found.any { it.mac == device.mac }) return@post
-                        found.add(device)
-                        hint.text = "发现 ${found.size} 台卡尺，点设备名连接"
-                        val title = "${device.name} · ${device.mac.takeLast(4)} · ${device.rssi}dBm"
-                        list.addView(webButton(title, small = true) {
-                            actions.toast("正在连接 ${device.mac.takeLast(4)}…")
-                            if (!c.connect(device.mac)) {
-                                actions.toast("通道已满，未连接 ${device.mac.takeLast(4)}")
-                            }
-                            refreshConnect(c, state, slotLabels)
-                        })
-                    }
-                }
-                val timeout = scanTimeout(c, found, hint, actions) { pendingTimeout = null }
-                pendingTimeout = timeout
-                handler.postDelayed(timeout, SCAN_TIMEOUT_MS)
-            },
-            webButton("全部断开", danger = true) {
-                c.disconnectAll()
+                val message = if (count == 0) "当前没有已连接或在连接的通道" else "已断开 $count 个通道"
+                hint.text = message
+                actions.toast(message)
                 refreshConnect(c, state, slotLabels)
             }
         ))
@@ -268,8 +227,8 @@ object Pages {
                 return
             }
             shown.take(MAX_ROWS).forEach { item ->
-                table.body.addView(webTableRow(item, CLOCK) {
-                    val detail = "CH${item.channelNo} · ${Units.formatMm(item.valueUm, 2)}mm · " +
+                table.body.addView(webTableRow(item, CLOCK, c.settings.decimals) {
+                    val detail = "CH${item.channelNo} · ${Units.formatMm(item.valueUm10, c.settings.decimals)}mm · " +
                         "${item.source} · ${item.note}"
                     actions.toast(detail)
                 })
@@ -294,7 +253,7 @@ object Pages {
                 (total.getChildAt(0) as TextView).text = "${items.size}"
                 (ok.getChildAt(0) as TextView).text = "${items.count { it.verdict == "PASS" }}"
                 (bad.getChildAt(0) as TextView).text = "${items.count { it.verdict == "FAIL" }}"
-                items.firstOrNull()?.let { setReading(reading, Units.formatMm(it.valueUm, 2)) }
+                items.firstOrNull()?.let { setReading(reading, Units.formatMm(it.valueUm10, c.settings.decimals)) }
             }
         }
         page.tag = job
@@ -334,7 +293,10 @@ object Pages {
 
     private fun captureControls(context: Context, c: AppContainer, actions: UiActions): List<View> = context.run {
         val seg = webSeg(listOf("mm", "inch"), 0) { index ->
-            actions.toast(if (index == 0) "内部统一存整数微米，显示 mm" else "内部统一存整数微米，inch 显示放 V2")
+            actions.toast(
+                if (index == 0) "内部统一存 0.1 微米整数，mm 显示 4 位小数无损"
+                else "内部统一存 0.1 微米整数，inch 显示放 V2"
+            )
         }
         var continuous = false
         val modeButton = webButton("切换为连续") {}
@@ -414,7 +376,8 @@ object Pages {
         col.addView(webBtnRow(
             webButton("刷新状态") { actions.setPage("P3") },
             webButton("全部断开") {
-                c.disconnectAll()
+                val count = c.disconnectAll()
+                actions.toast(if (count == 0) "当前没有已连接或在连接的通道" else "已断开 $count 个通道")
                 actions.setPage("P3")
             }
         ))
@@ -429,7 +392,7 @@ object Pages {
                 count.text = "${c.onlineCount()} / 7 在线"
                 for (i in 1..ChannelPalette.MAX_CHANNELS) {
                     val latest = items.firstOrNull { it.channelNo == i }
-                    values[i]?.text = latest?.let { Units.formatMm(it.valueUm, 2) } ?: "— mm"
+                    values[i]?.text = latest?.let { Units.formatMm(it.valueUm10) } ?: "— mm"
                 }
             }
         }
@@ -543,16 +506,16 @@ object Pages {
         var latest: List<Measurement> = emptyList()
         fun renderChart() {
             val shown = if (focus == 0) latest else latest.filter { it.channelNo == focus }
-            chart.points = shown.reversed().map { it.channelNo to it.valueUm }
-            chart.lowerUm = c.settings.lowerLimitUm
-            chart.upperUm = c.settings.upperLimitUm
+            chart.points = shown.reversed().map { it.channelNo to it.valueUm10 }
+            chart.lowerUm10 = c.settings.lowerLimitUm10
+            chart.upperUm10 = c.settings.upperLimitUm10
             chart.invalidate()
             (total.getChildAt(0) as TextView).text = "${shown.size}"
             if (shown.isNotEmpty()) {
-                val values = shown.map { it.valueUm }
-                (average.getChildAt(0) as TextView).text = Units.formatMm(values.average().toLong(), 2)
-                (minimum.getChildAt(0) as TextView).text = Units.formatMm(values.minOrNull() ?: 0L, 2)
-                (maximum.getChildAt(0) as TextView).text = Units.formatMm(values.maxOrNull() ?: 0L, 2)
+                val values = shown.map { it.valueUm10 }
+                (average.getChildAt(0) as TextView).text = Units.formatMm(values.average().toLong())
+                (minimum.getChildAt(0) as TextView).text = Units.formatMm(values.minOrNull() ?: 0L)
+                (maximum.getChildAt(0) as TextView).text = Units.formatMm(values.maxOrNull() ?: 0L)
             }
         }
         fun renderChips() {
@@ -624,87 +587,17 @@ object Pages {
     private fun settingsMeasureCard(context: Context, c: AppContainer, actions: UiActions): LinearLayout = context.run {
         val card = webCard()
         card.addView(webCardTitle("测量与判定"))
-        val decimals = context.edit(c.settings.decimals.toString())
-        val lower = context.edit(c.settings.lowerLimitUm?.let { Units.formatMm(it, 2) } ?: "")
-        val upper = context.edit(c.settings.upperLimitUm?.let { Units.formatMm(it, 2) } ?: "")
-        card.addView(webField("小数位数", "内部统一存整数微米", decimals))
+        val decimals = context.webEdit(c.settings.decimals.toString())
+        val lower = context.webEdit(c.settings.lowerLimitUm10?.let { Units.formatMm(it) } ?: "")
+        val upper = context.webEdit(c.settings.upperLimitUm10?.let { Units.formatMm(it) } ?: "")
+        card.addView(webField("小数位数（0–4）", "显示与导出统一，默认 4 位不四舍五入", decimals))
         card.addView(webField("公差下限 (mm)", "", lower))
         card.addView(webField("公差上限 (mm)", "", upper))
         card.addView(webButton("保存测量设置", small = true) {
             decimals.text.toString().toIntOrNull()?.let { c.settings.decimals = it }
-            c.settings.lowerLimitUm = lower.text.toString().toDoubleOrNull()?.let { (it * 1000).toLong() }
-            c.settings.upperLimitUm = upper.text.toString().toDoubleOrNull()?.let { (it * 1000).toLong() }
+            c.settings.lowerLimitUm10 = Units.toUm10(lower.text.toString(), 'm')
+            c.settings.upperLimitUm10 = Units.toUm10(upper.text.toString(), 'm')
             actions.toast("测量设置已保存")
-        })
-        card
-    }
-
-    private fun settingsBluetoothCard(
-        context: Context,
-        c: AppContainer,
-        actions: UiActions
-    ): LinearLayout = context.run {
-        val card = webCard()
-        card.addView(webCardTitle("蓝牙配置（新增 · 设备端参数）"))
-        card.addView(webBanner(
-            "设备端参数，App 不下发。自动发射时长、蓝牙自动休眠、HID 结束符由卡尺固件持有；本页仅按设备登记。\n" +
-                "接口文档只定义 NAM 改广播名；Android 第三方 App 无法配置卡尺 HID 键盘模式参数。",
-            WebTone.WARN
-        ))
-        val target = context.selector((1..ChannelPalette.MAX_CHANNELS).map { "CH$it" })
-        val nameInput = context.edit("GL-BLE#0187")
-        card.addView(webField("目标卡尺", "按通道 / MAC 绑定", target))
-        card.addView(webField("修改蓝牙名称", "NAM:<string> · ≤16 字符", nameInput))
-        card.addView(webBtnRow(
-            webButton("下发改名（NAM）", small = true) {
-                val channelNo = target.selectedItemPosition + 1
-                val ok = c.applyNam(channelNo, nameInput.text.toString())
-                actions.toast(
-                    if (ok) "改名指令已写入 CH$channelNo，等待设备回包"
-                    else "名称非法（须保留 GL-BLE# 前缀、总长 8–16）或该通道未连接"
-                )
-            },
-            webButton("读取当前名称", small = true) {
-                actions.toast("NAM 查询指令格式有歧义，M0 抓包确认前 V1 不实现实链路")
-            }
-        ))
-        val autoEmit = context.edit("30")
-        val sleep = webSwitch(false)
-        val sleepMinutes = context.edit("5")
-        val terminator = context.selector(listOf("回车 CR / LF", "Tab"))
-        val hidInput = context.edit("")
-        hidInput.hint = "接收或粘贴数值…"
-        card.addView(webField("自动发射时长（秒）", "设备端参数 · 仅登记", autoEmit))
-        card.addView(webField("蓝牙自动休眠", "设备端参数 · 仅登记", sleep))
-        card.addView(webField("休眠时间（分钟）", "设备端参数 · 仅登记", sleepMinutes))
-        card.addView(webField("结束符（HID 键盘模式）", "卡尺侧设置", terminator))
-        card.addView(webField("HID 键盘录入", "数值注入这里并落库", hidInput))
-        card.addView(webBtnRow(
-            webButton("保存登记（不下发）", small = true) {
-                val channelNo = target.selectedItemPosition + 1
-                val mac = c.settings.lastMac ?: "UNKNOWN"
-                c.settings.terminator = if (terminator.selectedItemPosition == 1) "TAB" else "CR"
-                c.deviceConfig.saveRegistration(
-                    mac = mac,
-                    name = nameInput.text.toString(),
-                    channelNo = channelNo,
-                    customName = nameInput.text.toString(),
-                    autoEmitSeconds = autoEmit.text.toString().toIntOrNull(),
-                    sleepEnabled = sleep.isChecked,
-                    sleepMinutes = sleepMinutes.text.toString().toIntOrNull(),
-                    terminator = c.settings.terminator
-                )
-                actions.toast("仅登记设备端参数，未下发到卡尺")
-            },
-            webButton("注入示例 HID 输入", small = true) {
-                hidInput.setText("155.15\t155.08\t154.96\t")
-            }
-        ))
-        card.addView(webButton("HID 录入落库", small = true) {
-            val channelNo = target.selectedItemPosition + 1
-            val mac = c.settings.lastMac ?: "HID"
-            val accepted = c.hid.submit(channelNo, mac, hidInput.text.toString())
-            actions.toast("HID 录入 $accepted 条，走同一条解析 → 去抖 → 落库链路")
         })
         card
     }
@@ -726,7 +619,21 @@ object Pages {
         val behavior = webCard()
         behavior.addView(webCardTitle("采集行为"))
         behavior.addView(webField("采集页屏幕常亮", "息屏断连会永久丢数", webSwitch(true)))
-        behavior.addView(webField("自动重连上次 MAC", "7 路各自记住上次 MAC", webSwitch(true)))
+        val autoSwitch = webSwitch(c.settings.autoConnect)
+        autoSwitch.setOnCheckedChangeListener { _, checked ->
+            c.settings.autoConnect = checked
+            actions.toast(if (checked) "已开启自动重连：下次启动自动连接" else "已关闭自动重连")
+        }
+        behavior.addView(webField("自动重连上次设备", "启动时自动连接上次连接过的卡尺", autoSwitch))
+        val idleMinutes = context.webEdit(c.settings.idleDisconnectMinutes.toString())
+        behavior.addView(webField("空闲自动断连（分钟）", "0 = 不断开；超时无数据由 App 断开通道，不下发设备参数", idleMinutes))
+        behavior.addView(webButton("保存断连设置", small = true) {
+            c.settings.idleDisconnectMinutes = idleMinutes.text.toString().toIntOrNull() ?: 0
+            actions.toast(
+                if (c.settings.idleDisconnectMinutes == 0) "空闲自动断连已关闭"
+                else "无数据 ${c.settings.idleDisconnectMinutes} 分钟后自动断开通道"
+            )
+        })
         col.addView(behavior)
 
         val maintenance = webCard(true)
@@ -741,13 +648,15 @@ object Pages {
             webButton("保存", primary = true) { actions.toast("设置已保存") },
             webButton("恢复默认") {
                 c.settings.decimals = 4
-                c.settings.lowerLimitUm = null
-                c.settings.upperLimitUm = null
+                c.settings.lowerLimitUm10 = null
+                c.settings.upperLimitUm10 = null
                 c.settings.terminator = "CR"
+                c.settings.autoConnect = true
+                c.settings.idleDisconnectMinutes = 0
                 actions.toast("已恢复默认设置")
             }
         ))
-        col.addView(webTiny("v0.2.0 · 原生 App · 升级前请先导出 CSV 备份").apply {
+        col.addView(webTiny("v0.3.0 · 原生 App · 数值以 0.1 微米存储 · 升级前请先导出 CSV 备份").apply {
             gravity = Gravity.CENTER
             setPadding(0, dp(12), 0, 0)
         })

@@ -18,11 +18,12 @@ import com.guanglu.caliper.core.database.entity.Template
 
 /**
  * 禁 fallbackToDestructiveMigration()：卡尺不保存历史数据，破坏性迁移等于永久丢失检验记录（A9）。
- * v1 = 基线第 6 节原始表；v2 = 追加通道号、历史通道标记与 device 的 5 个配置登记字段。
+ * v1 = 第 6 节的原始表结构；v2 = 追加通道号、历史通道标记与 device 的 5 个配置登记字段；
+ * v3 = 数值单位由整数微米改为 0.1 微米（10^-4 mm），存量数值 ×10 保持物理长度不变。
  */
 @Database(
     entities = [Measurement::class, Batch::class, Template::class, Device::class, AppMeta::class],
-    version = 2,
+    version = 3,
     exportSchema = false
 )
 /**
@@ -50,13 +51,26 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        val MIGRATION_2_3 = object : Migration(2, 3) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("UPDATE `measurement` SET `value_um` = `value_um` * 10")
+                db.execSQL("UPDATE `batch` SET `nominal_um` = `nominal_um` * 10 WHERE `nominal_um` IS NOT NULL")
+                db.execSQL(
+                    "UPDATE `batch` SET `lower_limit_um` = `lower_limit_um` * 10 WHERE `lower_limit_um` IS NOT NULL"
+                )
+                db.execSQL(
+                    "UPDATE `batch` SET `upper_limit_um` = `upper_limit_um` * 10 WHERE `upper_limit_um` IS NOT NULL"
+                )
+            }
+        }
+
         fun build(context: Context): AppDatabase =
             Room.databaseBuilder(
                 context.applicationContext,
                 AppDatabase::class.java,
                 "gl_caliper.db"
             )
-                .addMigrations(MIGRATION_1_2)
+                .addMigrations(MIGRATION_1_2, MIGRATION_2_3)
                 .build()
     }
 }

@@ -58,7 +58,7 @@ class MeasurementAdapter(
         val item = items[position]
         holder.time.text = clock.format(Date(item.capturedAt))
         val badge = if (item.legacyChannel) "历史" else "CH${item.channelNo}"
-        val text = SpannableString("$badge  ${Units.formatMm(item.valueUm, 2)} mm")
+        val text = SpannableString("$badge  ${Units.formatMm(item.valueUm10)} mm")
         text.setSpan(
             ForegroundColorSpan(ChannelPalette.colorOf(item.channelNo)),
             0,

@@ -19,10 +19,10 @@ class ChartCanvasView(context: Context) : View(context) {
     enum class Mode { LINE, BAR }
 
     var mode: Mode = Mode.LINE
-    /** 通道号与整数微米数值对。 */
+    /** 通道号与 0.1 微米整数数值对。 */
     var points: List<Pair<Int, Long>> = emptyList()
-    var lowerUm: Long? = null
-    var upperUm: Long? = null
+    var lowerUm10: Long? = null
+    var upperUm10: Long? = null
 
     private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply { strokeWidth = 4f }
     private val axisPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -43,8 +43,8 @@ class ChartCanvasView(context: Context) : View(context) {
             return
         }
         val values = points.map { it.second }
-        var min = (lowerUm ?: values.minOrNull() ?: 0L).toFloat()
-        var max = (upperUm ?: values.maxOrNull() ?: 1L).toFloat()
+        var min = (lowerUm10 ?: values.minOrNull() ?: 0L).toFloat()
+        var max = (upperUm10 ?: values.maxOrNull() ?: 1L).toFloat()
         if (max - min < 1f) {
             min -= 1f
             max += 1f
@@ -53,8 +53,8 @@ class ChartCanvasView(context: Context) : View(context) {
         val chartHeight = height - pad * 2
         val yOf: (Long) -> Float = { v -> pad + chartHeight * (1f - (v - min) / (max - min)) }
 
-        lowerUm?.let { drawLimit(canvas, yOf(it)) }
-        upperUm?.let { drawLimit(canvas, yOf(it)) }
+        lowerUm10?.let { drawLimit(canvas, yOf(it)) }
+        upperUm10?.let { drawLimit(canvas, yOf(it)) }
         canvas.drawLine(pad, height - pad, width - pad, height - pad, axisPaint)
 
         if (mode == Mode.LINE) drawLine(canvas, pad, yOf) else drawBars(canvas, pad, yOf)
@@ -100,5 +100,5 @@ class ChartCanvasView(context: Context) : View(context) {
         return bitmap
     }
 
-    fun labelOf(valueUm: Long): String = Units.formatMm(valueUm, 2)
+    fun labelOf(valueUm10: Long): String = Units.formatMm(valueUm10)
 }

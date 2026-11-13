@@ -19,6 +19,7 @@ import com.guanglu.caliper.core.bluetooth.channel.ChannelManager
 import com.guanglu.caliper.core.bluetooth.device.CaliperCommand
 import com.guanglu.caliper.core.database.AppDatabase
 import com.guanglu.caliper.core.datastore.SettingsRepository
+import com.guanglu.caliper.core.model.ChannelPalette
 import com.guanglu.caliper.core.usecase.BatchUseCase
 import com.guanglu.caliper.core.usecase.CaptureMeasurementsUseCase
 import com.guanglu.caliper.core.usecase.DeviceConfigUseCase
@@ -78,7 +79,31 @@ class AppContainer(context: Context) {
     fun applyNam(channelNo: Int, name: String): Boolean = channelManager.applyNam(channelNo, name)
     fun onlineCount(): Int = channelManager.onlineCount()
     fun channelSlots(): Map<Int, String> = channelManager.channelSlots()
-    fun disconnectAll() = channelSlots().values.forEach { channelManager.disconnect(it) }
+    fun disconnectAll(): Int = channelManager.disconnectAll()
+
+    @Volatile
+    private var autoConnectAttempted = false
+
+    /** 启动时自动连接上次连接过的卡尺；返回未执行的原因，null 表示已受理或已在执行。 */
+    fun autoConnectKnown(): String? {
+        if (autoConnectAttempted) return null
+        if (!settings.autoConnect) {
+            autoConnectAttempted = true
+            return null
+        }
+        val reason = scanReadiness()
+        if (reason != null) return reason
+        autoConnectAttempted = true
+        scope.launch {
+            val devices = deviceConfig.recentDevices(ChannelPalette.MAX_CHANNELS)
+            if (devices.isEmpty()) return@launch
+            val online = channelSlots().values
+            devices.filter { it.mac !in online }.forEach { channelManager.requestConnect(it.mac) }
+            diagnostics.log("AUTO_CONNECT ${devices.size} ${devices.joinToString { it.mac }}")
+            uiEvent("自动连接上次的 ${devices.size} 台卡尺…")
+        }
+        return null
+    }
 
     /** 返回无法扫描的原因，null 表示可扫描。 */
     fun scanReadiness(): String? {
@@ -114,7 +139,8 @@ class AppContainer(context: Context) {
     private val mainHandler = Handler(Looper.getMainLooper())
     private val idleRunnable = object : Runnable {
         override fun run() {
-            channelManager.pollIdle()
+            val idleMs = settings.idleDisconnectMinutes * 60_000L
+            channelManager.pollIdle(System.currentTimeMillis(), idleMs)
             mainHandler.postDelayed(this, 60L)
         }
     }
@@ -169,10 +195,15 @@ class AppContainer(context: Context) {
             is ChannelEvent.Ack -> uiEvent(
                 "CH${event.channelNo} ${event.command} ${if (event.ok) "OK" else "ERR（重试中）"}"
             )
-            is ChannelEvent.NamResult -> uiEvent(
-                if (event.ok) "CH${event.channelNo} 改名成功，可能需重连生效"
-                else "CH${event.channelNo} 改名失败（设备回 ERR）"
-            )
+            is ChannelEvent.NamResult -> {
+                if (event.ok && event.name.isNotBlank()) {
+                    deviceConfig.renameDevice(event.mac, event.name)
+                }
+                uiEvent(
+                    if (event.ok) "CH${event.channelNo} 改名成功：${event.name}，可能需重连生效"
+                    else "CH${event.channelNo} 改名失败（设备回 ERR）"
+                )
+            }
         }
     }
 }

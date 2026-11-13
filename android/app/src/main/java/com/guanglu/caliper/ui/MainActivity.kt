@@ -116,6 +116,11 @@ class MainActivity : ComponentActivity(), UiActions {
         requestBlePermissions()
     }
 
+    override fun onStart() {
+        super.onStart()
+        container.autoConnectKnown()?.let { toast(it) }
+    }
+
     override fun onDestroy() {
         (content.getChildAt(0)?.tag as? Job)?.cancel()
         container.uiEvent = {}
@@ -214,8 +219,12 @@ class MainActivity : ComponentActivity(), UiActions {
         grantResults: IntArray
     ) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
-        if (requestCode == REQ_PERMISSIONS && grantResults.any { it != 0 }) {
-            toast("蓝牙权限被拒绝，可在系统设置里开启；Android 10/11 还需打开定位总开关")
+        if (requestCode == REQ_PERMISSIONS) {
+            if (grantResults.isNotEmpty() && grantResults.all { it == 0 }) {
+                container.autoConnectKnown()?.let { toast(it) }
+            } else {
+                toast("蓝牙权限被拒绝，可在系统设置里开启；Android 10/11 还需打开定位总开关")
+            }
         }
     }
 

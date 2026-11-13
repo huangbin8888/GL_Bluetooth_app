@@ -8,22 +8,22 @@ import kotlin.math.abs
  * @author AI-Generated
  */
 class Debouncer(
-    private val sameValueDeltaUm: Long = 10L,
+    private val sameValueDeltaUm10: Long = 100L,
     private val windowMs: Long = 300L
 ) {
-    private data class Sample(val valueUm: Long, val elapsedMs: Long)
+    private data class Sample(val valueUm10: Long, val elapsedMs: Long)
     private val lastByChannel = HashMap<Int, Sample>()
 
     @Synchronized
-    fun shouldAccept(channelNo: Int, valueUm: Long, elapsedMs: Long): Boolean {
+    fun shouldAccept(channelNo: Int, valueUm10: Long, elapsedMs: Long): Boolean {
         val previous = lastByChannel[channelNo]
         if (previous != null &&
-            abs(valueUm - previous.valueUm) <= sameValueDeltaUm &&
+            abs(valueUm10 - previous.valueUm10) <= sameValueDeltaUm10 &&
             elapsedMs - previous.elapsedMs <= windowMs
         ) {
             return false
         }
-        lastByChannel[channelNo] = Sample(valueUm, elapsedMs)
+        lastByChannel[channelNo] = Sample(valueUm10, elapsedMs)
         return true
     }
 

@@ -15,7 +15,7 @@ class ProtocolTest {
     @Test fun dat0_parses_with_sign_and_unit() {
         val frame = GuangluCaliperHandler.accept("DAT0:m+155.15") as CaliperFrame.Measurement
         assertEquals("DAT0", frame.source)
-        assertEquals(155150L, frame.valueUm)
+        assertEquals(1551500L, frame.valueUm10)
         assertEquals('m', frame.unit)
         assertEquals('+', frame.sign)
         assertEquals("155.15", frame.rawValue)
@@ -24,7 +24,7 @@ class ProtocolTest {
     @Test fun dat1_inch_negative_is_converted() {
         val frame = GuangluCaliperHandler.accept("DAT1:i-1.2485") as CaliperFrame.Measurement
         assertEquals("DAT1", frame.source)
-        assertEquals(-31712L, frame.valueUm)
+        assertEquals(-317119L, frame.valueUm10)
         assertEquals('i', frame.unit)
         assertEquals('-', frame.sign)
     }
@@ -74,9 +74,9 @@ class ProtocolTest {
 
     @Test fun hid_token_reuses_the_same_parser() {
         val mm = GuangluCaliperHandler.fromHidToken("155.15") as CaliperFrame.Measurement
-        assertEquals(155150L, mm.valueUm)
+        assertEquals(1551500L, mm.valueUm10)
         val inch = GuangluCaliperHandler.fromHidToken("-1.2485 in") as CaliperFrame.Measurement
-        assertEquals(-31712L, inch.valueUm)
+        assertEquals(-317119L, inch.valueUm10)
         assertTrue(GuangluCaliperHandler.fromHidToken("") is CaliperFrame.Unknown)
     }
 }

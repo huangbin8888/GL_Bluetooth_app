@@ -79,6 +79,9 @@ interface DeviceDao {
     @Query("SELECT * FROM device ORDER BY last_connected_at DESC")
     fun observeAll(): Flow<List<Device>>
 
+    @Query("SELECT * FROM device WHERE last_connected_at > 0 ORDER BY last_connected_at DESC LIMIT :limit")
+    suspend fun recent(limit: Int): List<Device>
+
     @Query("UPDATE device SET is_last_used = 0")
     suspend fun clearLastUsed()
 

@@ -11,7 +11,7 @@ sealed class CaliperFrame {
         val rawValue: String,
         val unit: Char,
         val sign: Char,
-        val valueUm: Long,
+        val valueUm10: Long,
         /** 帧是否需要握手回包。 */
         val needsAck: Boolean = false
     ) : CaliperFrame()
@@ -31,7 +31,7 @@ enum class Source { DAT0, DAT1, MANUAL, IMPORT, HID }
 data class MeasurementDraft(
     val channelNo: Int,
     val deviceMac: String,
-    val valueUm: Long,
+    val valueUm10: Long,
     val rawValue: String,
     val rawUnit: Char,
     val sign: Char,

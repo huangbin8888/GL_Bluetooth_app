@@ -35,7 +35,7 @@ class CaptureMeasurementsUseCase(
     )
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
-    private val debouncer = Debouncer(settings.debounceDeltaUm, settings.debounceWindowMs)
+    private val debouncer = Debouncer(settings.debounceDeltaUm10, settings.debounceWindowMs)
     private val buffer = mutableListOf<Measurement>()
     private val lock = Any()
     private val seq = AtomicInteger(0)
@@ -56,16 +56,16 @@ class CaptureMeasurementsUseCase(
         source: Source? = null
     ) {
         val elapsed = clocks.elapsed()
-        if (!debouncer.shouldAccept(channelNo, frame.valueUm, elapsed)) {
+        if (!debouncer.shouldAccept(channelNo, frame.valueUm10, elapsed)) {
             onDiagnostic("DEDUP CH$channelNo ${frame.rawValue}")
             return
         }
-        val verdict = Units.judge(frame.valueUm, settings.lowerLimitUm, settings.upperLimitUm)
+        val verdict = Units.judge(frame.valueUm10, settings.lowerLimitUm10, settings.upperLimitUm10)
         val resolvedSource = source ?: (if (frame.needsAck) Source.DAT0 else Source.DAT1)
         val draft = MeasurementDraft(
             channelNo = channelNo,
             deviceMac = mac,
-            valueUm = frame.valueUm,
+            valueUm10 = frame.valueUm10,
             rawValue = frame.rawValue,
             rawUnit = frame.unit,
             sign = frame.sign,
@@ -107,7 +107,7 @@ class CaptureMeasurementsUseCase(
             seq = seq,
             channelNo = draft.channelNo,
             deviceMac = draft.deviceMac,
-            valueUm = draft.valueUm,
+            valueUm10 = draft.valueUm10,
             rawValue = draft.rawValue,
             rawUnit = draft.rawUnit.toString(),
             sign = draft.sign.toString(),

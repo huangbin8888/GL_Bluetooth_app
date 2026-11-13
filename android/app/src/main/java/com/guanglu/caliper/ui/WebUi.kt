@@ -10,8 +10,11 @@ import android.text.style.AbsoluteSizeSpan
 import android.text.style.ForegroundColorSpan
 import android.view.Gravity
 import android.view.View
+import android.widget.ArrayAdapter
 import android.widget.Button
+import android.widget.EditText
 import android.widget.LinearLayout
+import android.widget.Spinner
 import android.widget.Switch
 import android.widget.TextView
 import com.guanglu.caliper.core.database.entity.Measurement
@@ -348,6 +351,23 @@ fun Context.webSwitch(initial: Boolean): Switch = Switch(this).apply {
     text = ""
 }
 
+/** 设置页单行文本输入。 */
+fun Context.webEdit(initial: String): EditText = EditText(this).apply {
+    setText(initial)
+    setSingleLine(true)
+    textSize = 12.5f
+    gravity = Gravity.END or Gravity.CENTER_VERTICAL
+    background = webDrawable(Web.FILE_BG, dp(8).toFloat(), Web.LINE, 1)
+    setPadding(dp(8), 0, dp(8), 0)
+    layoutParams = LinearLayout.LayoutParams(dp(112), dp(34))
+}
+
+/** 设置页下拉选择。 */
+fun Context.webSpinner(items: List<String>): Spinner = Spinner(this).apply {
+    adapter = ArrayAdapter(context, android.R.layout.simple_spinner_item, items)
+    layoutParams = LinearLayout.LayoutParams(dp(112), dp(34))
+}
+
 fun Context.webCheck(title: String, hint: String, checked: Boolean, onChange: (Boolean) -> Unit): LinearLayout =
     LinearLayout(this).apply {
         orientation = LinearLayout.HORIZONTAL
@@ -553,7 +573,12 @@ fun Context.webTableHeader(): LinearLayout = LinearLayout(this).apply {
     )
 }
 
-fun Context.webTableRow(item: Measurement, clock: SimpleDateFormat, onClick: () -> Unit): LinearLayout =
+fun Context.webTableRow(
+    item: Measurement,
+    clock: SimpleDateFormat,
+    decimals: Int = 4,
+    onClick: () -> Unit
+): LinearLayout =
     LinearLayout(this).apply {
         orientation = LinearLayout.HORIZONTAL
         gravity = Gravity.CENTER_VERTICAL
@@ -580,7 +605,7 @@ fun Context.webTableRow(item: Measurement, clock: SimpleDateFormat, onClick: () 
         }
         valueBox.addView(webChMark(item.channelNo))
         valueBox.addView(
-            label(Units.formatMm(item.valueUm, 2), 15f, true, if (bad) Web.BAD else Web.TEXT).apply {
+            label(Units.formatMm(item.valueUm10, decimals), 15f, true, if (bad) Web.BAD else Web.TEXT).apply {
                 typeface = Typeface.MONOSPACE
             },
             LinearLayout.LayoutParams(

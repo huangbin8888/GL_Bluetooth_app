@@ -22,7 +22,7 @@ sealed class ChannelEvent {
     data class Rejected(val mac: String, val reason: String) : ChannelEvent()
     data class LimitReached(val actual: Int) : ChannelEvent()
     data class Ack(val channelNo: Int, val command: String, val ok: Boolean) : ChannelEvent()
-    data class NamResult(val channelNo: Int, val ok: Boolean) : ChannelEvent()
+    data class NamResult(val channelNo: Int, val mac: String, val name: String, val ok: Boolean) : ChannelEvent()
 }
 
 /**
@@ -37,7 +37,8 @@ class ChannelManager(
     private val onMeasurement: (Int, String, CaliperFrame.Measurement) -> Unit,
     private val onEvent: (ChannelEvent) -> Unit = {},
     private val onDiagnostic: (String) -> Unit = {},
-    private val connectTimeoutMs: Long = CONNECT_TIMEOUT_MS
+    private val connectTimeoutMs: Long = CONNECT_TIMEOUT_MS,
+    private val clock: () -> Long = { System.currentTimeMillis() }
 ) : BleConnectionCallback {
 
     val allocator = ChannelAllocator()
@@ -46,6 +47,8 @@ class ChannelManager(
     private val lastCommand = ConcurrentHashMap<String, ByteArray>()
     private val retryCount = ConcurrentHashMap<String, Int>()
     private val connectTimers = ConcurrentHashMap<String, TimerTask>()
+    private val lastActivity = ConcurrentHashMap<String, Long>()
+    private val pendingNam = ConcurrentHashMap<String, String>()
     private val retryTimer = Timer("cmd-retry", true)
 
     @Volatile
@@ -109,9 +112,19 @@ class ChannelManager(
         connectTimers.remove(mac)?.cancel()
     }
 
-    /** 60ms 帧尾 flush 轮询入口，由 AppContainer 的定时器驱动。 */
-    fun pollIdle(nowMs: Long = System.currentTimeMillis()) {
+    /** 60ms 帧尾 flush 轮询入口，由 AppContainer 的定时器驱动；同时执行空闲自动断连。 */
+    fun pollIdle(nowMs: Long = clock(), idleTimeoutMs: Long? = null) {
         slots.values.forEach { it.onIdle(nowMs) }
+        val timeout = idleTimeoutMs ?: return
+        if (timeout <= 0L) return
+        val targets = slots.keys.filter { mac ->
+            val last = lastActivity[mac] ?: nowMs
+            nowMs - last > timeout
+        }
+        targets.forEach { mac ->
+            val minutes = timeout / 60_000L
+            disconnect(mac, "空闲自动断连（${minutes} 分钟无数据）")
+        }
     }
 
     fun sendCommand(channelNo: Int, command: CaliperCommand): Boolean {
@@ -129,18 +142,33 @@ class ChannelManager(
         val mac = allocator.macOf(channelNo) ?: return false
         if (!GuangluCaliperHandler.validateNam(name)) return false
         val bytes = GuangluCaliperHandler.buildNamCommand(name)
+        pendingNam[mac] = name
         commandQueue.submit(mac, bytes)
         onDiagnostic("TX CH$channelNo $mac ${String(bytes, Charsets.US_ASCII)}")
         return true
     }
 
-    fun disconnect(mac: String) {
+    @Synchronized
+    fun disconnect(mac: String, reason: String = "用户断开") {
+        clearConnectTimeout(mac)
+        if (connectingMac == mac) connectingMac = null
+        pendingConnections.remove(mac)
         transport.disconnect(mac)
         val slot = allocator.release(mac) ?: 0
         slots.remove(mac)
         commandQueue.cancelFor(mac)
         lastCommand.remove(mac)
-        onEvent(ChannelEvent.Disconnected(slot, mac, "用户断开"))
+        lastActivity.remove(mac)
+        onEvent(ChannelEvent.Disconnected(slot, mac, reason))
+    }
+
+    /** 断开全部在线通道并取消所有排队 / 进行中的连接，返回断开与取消的设备数。 */
+    @Synchronized
+    fun disconnectAll(): Int {
+        val macs = slots.keys.toList() + pendingConnections.toList() + listOfNotNull(connectingMac)
+        val unique = macs.distinct()
+        unique.forEach { mac -> disconnect(mac, "用户断开") }
+        return unique.size
     }
 
     fun setDeviceLimit(limit: Int) = allocator.setDeviceLimit(limit)
@@ -161,6 +189,8 @@ class ChannelManager(
         }
         lastCommand.clear()
         retryCount.clear()
+        lastActivity.clear()
+        pendingNam.clear()
     }
 
     // ---- BleConnectionCallback ----
@@ -170,6 +200,7 @@ class ChannelManager(
         connectingMac = null
         val slotNo = allocator.slotOf(mac) ?: return
         slots[mac] = ChannelSlot(driver, sinkFor(mac))
+        lastActivity[mac] = clock()
         onEvent(ChannelEvent.Connected(slotNo, mac))
         pumpConnections()
     }
@@ -177,6 +208,7 @@ class ChannelManager(
     override fun onBytes(mac: String, bytes: ByteArray) {
         val text = String(bytes, Charsets.US_ASCII)
         onDiagnostic("RX $mac $text")
+        lastActivity[mac] = clock()
         slots[mac]?.onBytes(bytes)
     }
 
@@ -231,7 +263,8 @@ class ChannelManager(
         override fun onAck(frame: CaliperFrame.Ack) {
             val channelNo = allocator.slotOf(mac) ?: return
             if (frame.command == GuangluCaliperHandler.COMMAND_NAM) {
-                onEvent(ChannelEvent.NamResult(channelNo, frame.ok))
+                val name = pendingNam.remove(mac).orEmpty()
+                onEvent(ChannelEvent.NamResult(channelNo, mac, name, frame.ok))
                 return
             }
             onEvent(ChannelEvent.Ack(channelNo, frame.command, frame.ok))

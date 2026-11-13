@@ -1,6 +1,8 @@
 package com.guanglu.caliper.ui.pages
 
 import android.content.Context
+import android.os.Handler
+import android.os.Looper
 import android.view.Gravity
 import android.view.View
 import android.widget.LinearLayout
@@ -12,6 +14,7 @@ import com.guanglu.caliper.ui.Web
 import com.guanglu.caliper.ui.WebTone
 import com.guanglu.caliper.ui.dp
 import com.guanglu.caliper.ui.evenParams
+import com.guanglu.caliper.ui.webButton
 import com.guanglu.caliper.ui.webCard
 import com.guanglu.caliper.ui.webCardTitle
 import com.guanglu.caliper.ui.webChip
@@ -25,7 +28,7 @@ import com.guanglu.caliper.ui.webTiny
  */
 internal const val SCAN_TIMEOUT_MS = 10_000L
 
-internal fun connectHeader(context: Context, state: TextView): LinearLayout = context.run {
+internal fun connectHeader(context: Context, state: TextView, note: TextView): LinearLayout = context.run {
     val card = webCard(true)
     val row = LinearLayout(context).apply {
         orientation = LinearLayout.HORIZONTAL
@@ -38,7 +41,7 @@ internal fun connectHeader(context: Context, state: TextView): LinearLayout = co
     row.addView(state, evenParams().apply { marginStart = dp(9) })
     row.addView(webChip("GL-BLE# 前缀 · 上限 7", WebTone.BLUE))
     card.addView(row)
-    card.addView(webTiny("上次连接：7 路按上次 MAC 自动重连"))
+    card.addView(note)
     card
 }
 
@@ -85,4 +88,59 @@ internal fun connectFooter(context: Context): TextView = context.run {
         "机型适配：连接前先停止扫描；Android 限制 30 秒内最多 5 次扫描；重连后重新发现服务并订阅 notify。\n" +
             "7 路 GATT 走串行命令队列；单通道断连不影响其他通道继续采集。"
     )
+}
+
+/**
+ * 连接页扫描会话：就绪检查、可见反馈、10 秒超时与离开页面停扫描。
+ *
+ * @author AI-Generated
+ */
+internal class ScanSession(
+    private val c: AppContainer,
+    private val actions: UiActions,
+    private val found: MutableList<ScannedDevice>,
+    private val list: LinearLayout,
+    private val hint: TextView,
+    private val onConnected: () -> Unit
+) {
+    private val handler = Handler(Looper.getMainLooper())
+    private var pendingTimeout: Runnable? = null
+
+    fun stop() {
+        pendingTimeout?.let { handler.removeCallbacks(it) }
+        pendingTimeout = null
+        c.stopScan()
+    }
+
+    fun start() {
+        val reason = c.scanReadiness()
+        if (reason != null) {
+            actions.toast(reason)
+            hint.text = reason
+            return
+        }
+        stop()
+        found.clear()
+        list.removeAllViews()
+        hint.text = "正在扫描… 长按卡尺 data 键 3 秒后等待广播"
+        actions.toast("开始扫描 GL-BLE# 卡尺")
+        c.startScan { device ->
+            handler.post {
+                if (found.any { it.mac == device.mac }) return@post
+                found.add(device)
+                hint.text = "发现 ${found.size} 台卡尺，点设备名连接"
+                val title = "${device.name} · ${device.mac.takeLast(4)} · ${device.rssi}dBm"
+                list.addView(list.context.webButton(title, small = true) {
+                    actions.toast("正在连接 ${device.mac.takeLast(4)}…")
+                    if (!c.connect(device.mac)) {
+                        actions.toast("通道已满，未连接 ${device.mac.takeLast(4)}")
+                    }
+                    onConnected()
+                })
+            }
+        }
+        val timeout = scanTimeout(c, found, hint, actions) { pendingTimeout = null }
+        pendingTimeout = timeout
+        handler.postDelayed(timeout, SCAN_TIMEOUT_MS)
+    }
 }

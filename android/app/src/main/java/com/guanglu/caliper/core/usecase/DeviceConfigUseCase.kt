@@ -60,4 +60,15 @@ class DeviceConfigUseCase(
     }
 
     suspend fun load(mac: String): Device? = withContext(Dispatchers.IO) { dao.find(mac) }
+
+    /** 最近连接过的设备，按最后连接时间倒序，用于启动时自动重连。 */
+    suspend fun recentDevices(limit: Int): List<Device> = withContext(Dispatchers.IO) { dao.recent(limit) }
+
+    /** NAM 改名成功后同步本地登记名。 */
+    fun renameDevice(mac: String, name: String) {
+        scope.launch {
+            val existing = dao.find(mac) ?: return@launch
+            dao.upsert(existing.copy(name = name, customName = name))
+        }
+    }
 }

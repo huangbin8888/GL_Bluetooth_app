@@ -44,14 +44,14 @@ object GuangluCaliperHandler : CaliperDevice {
             val sign = data.groupValues[3][0]
             val number = data.groupValues[4]
             val signed = (if (sign == '-') "-" else "") + number
-            val valueUm = Units.toMicrometres(signed, data.groupValues[2][0])
+            val valueUm10 = Units.toUm10(signed, data.groupValues[2][0])
                 ?: return CaliperFrame.Unknown(frame)
             return CaliperFrame.Measurement(
                 source = data.groupValues[1],
                 rawValue = number,
                 unit = data.groupValues[2][0],
                 sign = sign,
-                valueUm = valueUm,
+                valueUm10 = valueUm10,
                 needsAck = data.groupValues[1] == "DAT0"
             )
         }

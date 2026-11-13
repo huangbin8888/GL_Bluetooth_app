@@ -64,8 +64,8 @@ class ImportExportUseCases(
         var duplicates = 0
         var parseErrors = parsed.parseErrors
         parsed.rows.forEach { row ->
-            val valueUm = Units.toMicrometres(row["VALUE_MM"].orEmpty(), 'm')
-            if (valueUm == null) {
+            val valueUm10 = Units.toUm10(row["VALUE_MM"].orEmpty(), 'm')
+            if (valueUm10 == null) {
                 parseErrors++
                 return@forEach
             }
@@ -78,7 +78,7 @@ class ImportExportUseCases(
             val (channelNo, legacy) = CsvCodec.channelOf(
                 row["CHANNEL"].orEmpty().ifBlank { "CH1" }
             )
-            val key = "${row["DATE"]}|${row["TIME"]}|$channelNo|$valueUm"
+            val key = "${row["DATE"]}|${row["TIME"]}|$channelNo|$valueUm10"
             if (!seen.add(key)) {
                 duplicates++
                 return@forEach
@@ -88,13 +88,13 @@ class ImportExportUseCases(
                 seq = entities.size + 1,
                 channelNo = channelNo,
                 deviceMac = row["DEVICE_MAC"].orEmpty(),
-                valueUm = valueUm,
+                valueUm10 = valueUm10,
                 rawValue = row["RAW_VALUE"].orEmpty().ifBlank { row["VALUE_MM"].orEmpty() },
                 rawUnit = row["RAW_UNIT"].orEmpty().ifBlank { "m" },
-                sign = if (valueUm < 0) "-" else "+",
+                sign = if (valueUm10 < 0) "-" else "+",
                 capturedAt = capturedAt,
                 elapsedRealtime = capturedAt,
-                verdict = Units.judge(valueUm, settings.lowerLimitUm, settings.upperLimitUm).name,
+                verdict = Units.judge(valueUm10, settings.lowerLimitUm10, settings.upperLimitUm10).name,
                 note = row["NOTE"].orEmpty(),
                 source = "IMPORT",
                 legacyChannel = legacy
@@ -130,7 +130,7 @@ class ImportExportUseCases(
             "NOMINAL" to "",
             "LOWER_TOL" to "",
             "UPPER_TOL" to "",
-            "VALUE_MM" to Units.formatMm(item.valueUm, settings.decimals),
+            "VALUE_MM" to Units.formatMm(item.valueUm10, settings.decimals),
             "RAW_VALUE" to item.rawValue,
             "RAW_UNIT" to item.rawUnit,
             "VERDICT" to item.verdict,
