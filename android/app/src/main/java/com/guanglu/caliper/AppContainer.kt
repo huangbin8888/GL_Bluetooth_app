@@ -67,6 +67,7 @@ class AppContainer(context: Context) {
     fun applyNam(channelNo: Int, name: String): Boolean = channelManager.applyNam(channelNo, name)
     fun onlineCount(): Int = channelManager.onlineCount()
     fun channelSlots(): Map<Int, String> = channelManager.channelSlots()
+    fun disconnectAll() = channelSlots().values.forEach { channelManager.disconnect(it) }
 
     /** UI 订阅的状态文案；MainActivity 在 onResume 里设置。 */
     @Volatile

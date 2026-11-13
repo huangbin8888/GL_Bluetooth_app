@@ -3,14 +3,17 @@ package com.guanglu.caliper.ui
 import android.Manifest
 import android.content.Intent
 import android.graphics.Bitmap
+import android.graphics.Color
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
+import android.view.Gravity
+import android.view.View
 import android.view.WindowManager
-import android.widget.Button
 import android.widget.FrameLayout
 import android.widget.LinearLayout
+import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.core.view.ViewCompat
@@ -25,7 +28,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 
 /**
- * 主界面：7 屏切换、权限申请与 SAF 调用。
+ * 主界面：蓝色标题栏、页面容器与底部四标签。
  *
  * @author AI-Generated
  */
@@ -33,62 +36,79 @@ class MainActivity : ComponentActivity(), UiActions {
 
     private lateinit var container: AppContainer
     private lateinit var content: FrameLayout
+    private lateinit var appTitle: TextView
+    private lateinit var appBadge: TextView
+    private lateinit var tabBar: LinearLayout
     private var pendingChannel: Int? = null
     private var pendingBitmap: Bitmap? = null
     private var currentPage = "P2"
-    private val navButtons = mutableMapOf<String, Button>()
-    private val tabButtons = mutableMapOf<String, Button>()
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        // 采集页保持屏幕常亮。
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         container = (application as CaliperApp).container
         container.uiEvent = { message -> runOnUiThread { toast(message) } }
 
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(dp(10), dp(6), dp(10), dp(6))
+            setBackgroundColor(Web.BG)
         }
         ViewCompat.setOnApplyWindowInsetsListener(root) { view, insets ->
             val bars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
-            view.setPadding(dp(10), bars.top + dp(6), dp(10), bars.bottom + dp(6))
+            view.setPadding(0, bars.top, 0, bars.bottom)
             insets
         }
-        root.addView(
-            label("蓝牙卡尺测量数据助手 · v0.1.1", 12f, true),
-            LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT
-            ).apply { bottomMargin = dp(4) }
-        )
 
-        val nav = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
-        listOf("P1", "P2", "P3", "P4", "P5", "P6", "P7").forEach { id ->
-            val button = compactButton(id) { setPage(id) }
-            navButtons[id] = button
-            nav.addView(button, evenParams())
+        val appbar = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setBackgroundColor(Web.PRIMARY)
+            setPadding(dp(14), 0, dp(14), 0)
         }
-        root.addView(
-            nav,
-            LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT)
+        val back = TextView(this).apply {
+            text = "‹"
+            textSize = 20f
+            gravity = Gravity.CENTER
+            setTextColor(Color.WHITE)
+            setOnClickListener { setPage("P2") }
+        }
+        appbar.addView(back, LinearLayout.LayoutParams(dp(26), dp(26)))
+        appTitle = label("实时检测 · 记录", 16f, true, Color.WHITE)
+        appbar.addView(
+            appTitle,
+            LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply {
+                marginStart = dp(10)
+            }
         )
+        appBadge = webBadge("手动")
+        appbar.addView(appBadge)
+        root.addView(appbar, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(Web.APPBAR_H)))
 
-        content = FrameLayout(this)
+        content = FrameLayout(this).apply {
+            setBackgroundColor(Web.BG)
+            setPadding(
+                dp(Web.VIEWPORT_PAD),
+                dp(Web.VIEWPORT_PAD),
+                dp(Web.VIEWPORT_PAD),
+                dp(Web.VIEWPORT_PAD)
+            )
+        }
         root.addView(
             content,
             LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f)
         )
 
-        val tabs = horizontal()
-        listOf("连接" to "P1", "检测" to "P2", "通道" to "P3", "分析" to "P5").forEach { (name, id) ->
-            val button = compactButton(name) { setPage(id) }
-            tabButtons[id] = button
-            tabs.addView(button, evenParams())
+        root.addView(
+            View(this).apply { setBackgroundColor(Web.LINE) },
+            LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(1))
+        )
+        tabBar = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            setBackgroundColor(Web.CARD)
         }
         root.addView(
-            tabs,
-            LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT)
+            tabBar,
+            LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(Web.TABBAR_H))
         )
         setContentView(root)
 
@@ -103,18 +123,22 @@ class MainActivity : ComponentActivity(), UiActions {
         super.onDestroy()
     }
 
-    // ---- 7 屏切换 ----
-
     override fun setPage(pageId: String) {
         currentPage = pageId
-        navButtons.forEach { (id, button) -> button.alpha = if (id == pageId) 1f else 0.55f }
-        tabButtons.forEach { (id, button) -> button.alpha = if (id == pageId) 1f else 0.55f }
         (content.getChildAt(0)?.tag as? Job)?.cancel()
         content.removeAllViews()
         content.addView(Pages.build(this, pageId, container, this))
+        appTitle.text = PAGE_TITLES[pageId] ?: "实时检测 · 记录"
+        appBadge.text = if (pageId == "P2") "手动" else "7 通道"
+        renderTabs()
     }
 
-    // ---- UiActions ----
+    private fun renderTabs() {
+        tabBar.removeAllViews()
+        listOf("连接" to "P1", "检测" to "P2", "通道" to "P3", "分析" to "P5").forEach { (name, id) ->
+            tabBar.addView(webTab(name, id == currentPage) { setPage(id) })
+        }
+    }
 
     override fun toast(message: String) {
         Toast.makeText(this, message, Toast.LENGTH_SHORT).show()
@@ -148,8 +172,6 @@ class MainActivity : ComponentActivity(), UiActions {
         }
         startActivity(intent)
     }
-
-    // ---- SAF 与权限 ----
 
     private fun createDocument(mime: String, title: String, requestCode: Int) {
         val intent = Intent(Intent.ACTION_CREATE_DOCUMENT).apply {
@@ -198,6 +220,15 @@ class MainActivity : ComponentActivity(), UiActions {
     }
 
     companion object {
+        private val PAGE_TITLES = mapOf(
+            "P1" to "连接卡尺",
+            "P2" to "实时检测 · 记录",
+            "P3" to "多通道",
+            "P4" to "表格模板",
+            "P5" to "数据分析",
+            "P6" to "导出到本地",
+            "P7" to "设置"
+        )
         private const val REQ_PERMISSIONS = 1001
         private const val REQ_EXPORT_CSV = 2001
         private const val REQ_IMPORT_CSV = 2002

@@ -1,6 +1,6 @@
 # 蓝牙卡尺测量数据助手 · App 需求规格说明书（草案·待确认）
 
-> 版本：v0.10 · 日期：2026-11-13 · 状态：**需求已确认 · 通道回退 7 路 · 蓝牙配置边界已定 · 真编译 + 39 项 JVM 单测全通过、debug APK 已产出；正式代码审计完成；真机反馈的界面显示不全已修复（M0 实机验证仍缺）**
+> 版本：v0.11 · 日期：2026-11-13 · 状态：**需求已确认 · 通道回退 7 路 · 蓝牙配置边界已定 · 真编译 + 39 项 JVM 单测全通过、debug APK 已产出；正式代码审计完成；真机反馈的界面显示不全已修复；Web 版 UI 一比一样式复刻（原生 View 重绘）已完成（M0 实机验证仍缺）**
 > 依据：① 你的口述需求与 2026-11-12 确认；②《广陆蓝牙设备数字化接口_通用.doc》（标题：试验设备数据通信接口标准模板）；③ [GitHub开源案例调研.md](./GitHub开源案例调研.md)；④ [V1开发基线.md](./V1开发基线.md)
 > 标注约定：**「原话」= 你明确提出的需求**；**【AI建议】= 我补的，需要你拍板**。
 >
@@ -17,6 +17,8 @@
 > **v0.9 变更（纯追加 + 状态行修订）**：用户「开始 v1 开发基线 写正式的代码 写完记得审计一下」在本轮收尾。按《Android 编码规范（修订版）》十六节完成全量静态审计与整改：29 处类级 JavaDoc 统一为「一句 what + `@author AI-Generated`」、38 处 why / 设计意图 / 基线编号注释清除、3 处超宽行与 11 处行尾注释修正；修复 6 项真实缺陷（`isConnected` 误判、`setNotify` 订阅无确认、`write` 未校验连接、每帧起协程、`close()` 未释放资源、UI 协议字面量）。产出独立报告 [docs/代码审计报告.md](./docs/代码审计报告.md)，逐条核查 7 条分层约束与十六节规范。**重新真编译 + 39 项单测仍全部通过，APK 已按最终源码重建**（SHA-256 `ee10f103…`）。范围、18 项功能清单、12 项必补约束、技术路线 C 一条未改；M0 实机验证仍全部阻塞，存量命名前缀 / Activity Result API 迁移 / 覆盖率 80% 未达标等遗留项在审计报告第 7 节如实列出。
 >
 > **v0.10 变更（纯追加 + 状态行修订）**：用户真机安装后反馈「界面显示不全」（截图可核查：顶部 7 个页面按钮只露出 P1–P4、控制按钮文字折行、采集页列表固定 360dp 造成大片空白把「设置 / 导出」推到屏幕下缘、根布局无内边距）。本轮只改 UI 布局，不动需求范围 / 接口协议 / 分层约束：① 顶部 P1–P7 与底部 4 个标签改为紧凑按钮按权重等分，一屏全部可见并高亮当前页；② 采集页改为「固定头部 + 自适应列表 + 固定底栏」，空列表显示「暂无记录」提示，消除空白断层；③ 4 组横向按钮行统一等分单行；④ 根布局按系统栏 inset 加内边距；⑤ `versionCode` 1→2、`versionName` `0.1.0-m0`→`0.1.1`。**重新真编译 BUILD SUCCESSFUL、39 项单测 0 失败，[dist/gl-caliper-debug.apk](./dist/gl-caliper-debug.apk) 已重建**（SHA-256 `50490fad…`）。本机未连接真机 / 模拟器，渲染效果需装机复核；M0 实机验证仍全部阻塞。详见 [V1开发基线.md](./V1开发基线.md) 第 16 节。
+>
+> **v0.11 变更（纯追加 + 状态行修订）**：用户「用web版ui做一比一的样式复刻」。技术决策：**保持技术路线 C（纯原生 Kotlin + Room + blessed-android + SAF）不变，不用 WebView 替换业务链路**；用原生 View 重绘 [demo/index.html](./demo/index.html) 的 CSS 设计系统。新增 `ui/WebUi.kt` 组件库，`MainActivity.kt` 改为 appbar(54dp) + viewport(12dp) + tabbar(56dp) 三段式，`Pages.kt` P1–P7 按 web 原型重排，`AppContainer` 增 `disconnectAll()`；`versionCode` 2→3、`versionName` `0.1.1`→`0.2.0`。**重新真编译 BUILD SUCCESSFUL in 28s、39 项单测 0 失败，[dist/gl-caliper-debug.apk](./dist/gl-caliper-debug.apk) 已重建**（SHA-256 `8cf30210…`）；静态自检行宽 / 注释 / 异常 / 日志 / 函数长度均为 0 违例。需求范围、18 项功能清单、12 项必补约束、7 条分层约束、蓝牙配置硬边界一条未改。本机无真机 / 模拟器，一比一视觉效果仍需装机截图复核；M0 实机验证仍全部阻塞。详见 [V1开发基线.md](./V1开发基线.md) 第 17 节与审计报告第 12 节。
 
 ---
 
@@ -415,3 +417,51 @@
 **To Verify（M0）**：见 17.5，Owner 均为 M0 实机，证据格式为 BLE 抓包 / notify 原始字节日志 / 机型清单。
 **V2 / 阻塞**：拿到厂商配置指令集后，把自动发射时长、休眠、结束符改为原生下发；HID Host 直连配置在 Android 第三方 App 上不可行，需厂商 PC 工具或卡尺按键操作。
 **交付边界**：本轮交付 `README.md` v0.6、[V1开发基线.md](./V1开发基线.md) v1.3、[demo/index.html](./demo/index.html) v0.3、[mvp/](./mvp/) v1.1；**未写 Android 业务源码、未构建 APK、未修改接口协议文档**，正式 APK 仍停在 M0 之前。
+
+---
+
+## ⑱ Web 版 UI 一比一样式复刻（v0.11 · 2026-11-13）
+
+> 本节为**纯追加**：第 0–⑰ 节的结论、18 项功能清单、12 项必补约束、用户原话一条未删。本节只记录样式复刻的落点与边界，不改需求范围、不改技术路线 C、不改接口协议、不改 7 条分层约束。
+
+### 18.1 触发与技术决策
+
+用户要求「用web版ui做一比一的样式复刻」。参照物是 [demo/index.html](./demo/index.html) v0.3 的 CSS 设计系统与 [mvp/](./mvp/) 的页面框架（两者手机壳 / appbar / viewport / tabbar / 两列表格 / 7 通道结构一致，demo 为视觉主参考）。
+
+**决策：不用 WebView 承载业务页面，改用原生 Kotlin View 逐项重绘 web CSS。** 理由是技术路线 C 已确认且真实能力（BLE 7 路并发、Room、SAF 导入导出、HID 录入、PNG 导出）都在原生层；若换成 WebView，需要重做 JS Bridge、丢失已通过的 39 项单测与分层约束，并把「可安装 APK」退化为「网页套壳」。因此本次**只换展示层，不换业务链路**。
+
+### 18.2 设计系统映射
+
+| Web 原型 | 原生实现（`ui/WebUi.kt`） |
+| --- | --- |
+| `:root` 调色板 `--bg #F3F5F9` / `--card #FFF` / `--line #E2E7F0` / `--text #16202F` / `--sub #6B778C` / `--primary #1668E3` / `--primary-soft #E8F0FE` | `object Web` 中同名常量，另补 OK / BAD / WARN 语义色与表格 / 分段控件底色 |
+| `--radius:12px`、卡片 12dp 内边距、10dp 卡片间距 | `Web.RADIUS=12` / `CARD_PAD=12` / `CARD_GAP=10`，`webDrawable()` 用 `GradientDrawable` 统一圆角与描边 |
+| `.appbar{height:54px}` / `.viewport{padding:12px}` / `.tabbar{height:56px}` | `Web.APPBAR_H=54` / `VIEWPORT_PAD=12` / `TABBAR_H=56`，`MainActivity` 三段式 `LinearLayout` |
+| `.btn` / `.btn-primary` / `.chip` / `.banner` / `.card` / `.seg` / `.ch-card` / 两列表格 | `webButton()` / `webChip()` / `webBanner()` / `webCard()` / `webSeg()` / `webChCard()` / `webTableRow()`，均为纯代码 View，无新增三方 UI 依赖 |
+| 大号读数 + 小号单位 | `webReading()` 用 `SpannableString` + `AbsoluteSizeSpan` / `ForegroundColorSpan`，刷新走 `setReading()` |
+
+### 18.3 七屏与业务落点
+
+| 页面 | 复刻内容 | 业务能力保持 |
+| --- | --- | --- |
+| P1 连接 | 状态卡、info/warn banner、附近设备、CH1–CH7 槽位、扫描 / 全部断开 / 连接全部 7 台 | `startScan` / `connect` / 新增 `disconnectAll()`，第 8 台仍拒绝 |
+| P2 检测 | 读数卡、通道 chips、只含「时间 + 数值」两列表格、stat strip、批次卡、mm/inch 分段、控制按钮 | `measurements()` Flow 渲染、`CaliperCommand` 下发、`DAT0:OK` 回包链路不变 |
+| P3 多通道 | info banner、占用统计、7 色 legend、2 列通道卡片墙 | 7 通道真实状态，单通道断连不影响其他通道 |
+| P4 模板 | 模板列表、字段预览、BOM / CHANNEL banner | CSV 导入 / 诊断导出仍走 SAF |
+| P5 分析 | 折线 / 柱状分段、通道筛选、图表卡、统计卡 | `ChartCanvasView` 原生 Canvas，PNG 导出不变 |
+| P6 导出 | 导出勾选、范围、文件名预览、按通道分文件 | `exportCsv(channelNo)` 不变，CH8 越界已修 |
+| P7 设置 | 测量与判定、多通道、蓝牙配置、采集行为、维护入口 | `NAM` 仍是唯一可下发指令；三项设备端参数仍只登记、不提示配置成功 |
+
+### 18.4 约束保持与验证证据
+
+- **7 条分层约束逐条 PASS**：`ui/` 无 `BleTransport` / `*Dao` / `AppDatabase` 引用；协议帧构造与解析仍只在 `GuangluCaliperHandler`；UI 中 `DAT0` / `MEAS` / `CLR` / `NAM` 等字样均为**静态展示文案**，命令下发一律走 `CaliperCommand` 枚举；DB 写入仍只在 3 个 usecase；`MAX_CHANNELS = 7` 仍是唯一来源；导入导出仍走 SAF、无硬编码路径。
+- **真编译**：`gradle :app:testDebugUnitTest :app:assembleDebug --no-daemon` → `BUILD SUCCESSFUL in 28s`，无 `e:` 错误；6 个测试类 39 项 `@Test` 0 failures / 0 errors / 0 skipped。
+- **APK**：`dist/gl-caliper-debug.apk` 3.2 MB，`versionCode='3' versionName='0.2.0'`，SHA-256 `8cf30210a93f5fdfb51a4584f11590a1e3989c1de5a625a568488e12eb87d546`；`aapt2 dump badging` 确认 minSdk 26 / targetSdk 36 / compileSdk 36、权限无 `BLUETOOTH_ADVERTISE`；`apksigner verify` → `Verifies`（v2）。
+- **规范整改**：删除 `build.gradle.kts` 残留的 why / 设计意图注释，拆分 1 处 122 字符超宽签名，把 `Pages.capture()` 拆出 `captureBatchCard()` / `captureControls()` 使所有函数 ≤ 80 行；复检行宽 >120、裸 `catch(Exception)`、内联全限定名、行尾 / why 注释、日志直调、缺 `@author`、超长方法均为 0。
+
+### 18.5 未验证与边界（如实列出）
+
+- 本机 `adb devices` 为空，无真机 / 模拟器，**一比一视觉效果未在本机截图复核**；请安装 `0.2.0` 后回传截图（含机型与屏幕宽度），逐屏比对 demo。
+- 布局按 dp 对齐 web 的 px 设计值，但 Android 字体度量、dpi 换算、状态栏高度与浏览器 CSS 渲染不可能逐像素相同；「一比一」指**配色 / 圆角 / 间距 / 组件层级 / 页面结构 / 交互位置**对齐，不承诺像素级一致。
+- **M0 实机验证全部阻塞项不变**：卡尺实物 / Android 真机 / BLE 抓包 / 7 路并发上限实测 / `DAT0:OK` 回包时机与帧尾 / `NAM` 格式 / HID 实链 / release v1+v2+v3 签名。**APK 能安装 ≠ 蓝牙链路已验证**。
+- 审计报告第 7 节遗留项（存量命名前缀、Activity Result API 迁移、覆盖率 80%、Espresso、debug 仅 v2 签名）本轮未改。

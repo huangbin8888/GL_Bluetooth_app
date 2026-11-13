@@ -23,8 +23,8 @@ android {
         applicationId = "com.guanglu.caliper"
         minSdk = 26
         targetSdk = 36
-        versionCode = 2
-        versionName = "0.1.1"
+        versionCode = 3
+        versionName = "0.2.0"
     }
 
     signingConfigs {
@@ -50,9 +50,6 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
-            // 基线 2.4 要求 v1+v2+v3 全开。AGP 8.x 的签名方案默认值随 minSdk 变化，
-            // M0 必须用 `apksigner verify --verbose` 实测三类签名是否齐全；
-            // 缺 v1 时按所用 AGP 版本补对应的 enableV1Signing 设置，不在此猜测 API。
             if (keystorePropertiesFile.exists()) {
                 signingConfig = signingConfigs.getByName("release")
             }
