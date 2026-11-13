@@ -16,6 +16,16 @@ internal fun tableFrameHeightDp(rowCount: Int): Int =
 /** 框内渲染的行数上限，超出部分不创建 View。 */
 internal fun visibleRows(rowCount: Int): Int = minOf(rowCount, MAX_TABLE_ROWS)
 
+/** 本次手势是否继续由表格框处理；滚到边界后交还外层页面。 */
+internal fun shouldKeepInnerScroll(
+    deltaY: Float,
+    canScrollDown: Boolean,
+    canScrollUp: Boolean
+): Boolean = if (deltaY > 0f) canScrollDown else canScrollUp
+
+/** 用户拖动表格框期间不重建行，避免刷新清空滚动位置。 */
+internal fun shouldRenderRows(interacting: Boolean): Boolean = !interacting
+
 /**
  * 清除数据按钮的二次确认状态机。
  *

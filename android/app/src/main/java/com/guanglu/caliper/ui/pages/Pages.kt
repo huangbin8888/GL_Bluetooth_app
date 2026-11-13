@@ -3,7 +3,6 @@ package com.guanglu.caliper.ui.pages
 import android.content.Context
 import android.graphics.Bitmap
 import android.view.Gravity
-import android.view.MotionEvent
 import android.view.View
 import android.widget.FrameLayout
 import android.widget.LinearLayout
@@ -67,16 +66,6 @@ object Pages {
     private fun even(context: Context, weight: Float = 1f): LinearLayout.LayoutParams =
         LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, weight)
 
-    private class LiveTable(
-        val card: LinearLayout,
-        val body: LinearLayout,
-        val scope: TextView,
-        val frame: ScrollView,
-        val clearButton: TextView
-    ) {
-        var restoreScroll: Runnable? = null
-    }
-
     private fun liveTable(context: Context): LiveTable = context.run {
         val card = LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL
@@ -114,15 +103,15 @@ object Pages {
         })
         card.addView(webTableHeader())
         val body = LinearLayout(context).apply { orientation = LinearLayout.VERTICAL }
-        val frame = ScrollView(context).apply {
+        val frame = TableFrame(context).apply {
             layoutParams = LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
                 dp(tableFrameHeightDp(0))
             )
             background = webDrawable(Web.CARD, dp(8).toFloat(), Web.LINE, 1)
             isVerticalScrollBarEnabled = true
+            isScrollbarFadingEnabled = false
             isFillViewport = true
-            enableInnerScroll()
         }
         frame.addView(body, FrameLayout.LayoutParams(
             FrameLayout.LayoutParams.MATCH_PARENT,
@@ -134,26 +123,6 @@ object Pages {
         footer.setPadding(dp(10), dp(8), dp(10), dp(8))
         card.addView(footer)
         LiveTable(card, body, scope, frame, clearButton)
-    }
-
-    private fun ScrollView.enableInnerScroll() {
-        var downY = 0f
-        setOnTouchListener { view, event ->
-            when (event.actionMasked) {
-                MotionEvent.ACTION_DOWN -> {
-                    downY = event.y
-                    view.parent.requestDisallowInterceptTouchEvent(true)
-                }
-                MotionEvent.ACTION_MOVE -> {
-                    val dy = downY - event.y
-                    val canScroll = if (dy > 0) view.canScrollVertically(1) else view.canScrollVertically(-1)
-                    view.parent.requestDisallowInterceptTouchEvent(canScroll)
-                }
-                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL ->
-                    view.parent.requestDisallowInterceptTouchEvent(false)
-            }
-            false
-        }
     }
 
     private fun bindClearButton(c: AppContainer, actions: UiActions, table: LiveTable) {
@@ -308,6 +277,12 @@ object Pages {
         }
         renderChips()
         renderTable()
+        table.frame.onInteractionEnd = {
+            if (table.pendingRender) {
+                table.pendingRender = false
+                renderTable()
+            }
+        }
         val job: Job = CoroutineScope(Dispatchers.Main).launch {
             c.measurements().collect { items ->
                 latest = items
@@ -333,6 +308,11 @@ object Pages {
         decimals: Int,
         actions: UiActions
     ) {
+        if (!shouldRenderRows(table.frame.interacting)) {
+            table.pendingRender = true
+            return
+        }
+        table.pendingRender = false
         val anchor = if (shown.isEmpty()) 0 else table.frame.scrollY
         table.body.removeAllViews()
         if (shown.isEmpty()) {

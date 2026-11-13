@@ -4,6 +4,8 @@ import com.guanglu.caliper.ui.pages.CLEAR_CONFIRM_WINDOW_MS
 import com.guanglu.caliper.ui.pages.ClearConfirm
 import com.guanglu.caliper.ui.pages.MAX_TABLE_ROWS
 import com.guanglu.caliper.ui.pages.TABLE_FRAME_HEIGHT_DP
+import com.guanglu.caliper.ui.pages.shouldKeepInnerScroll
+import com.guanglu.caliper.ui.pages.shouldRenderRows
 import com.guanglu.caliper.ui.pages.tableFrameHeightDp
 import com.guanglu.caliper.ui.pages.visibleRows
 import org.junit.Assert.assertEquals
@@ -95,5 +97,63 @@ class CaptureTablePolicyTest {
         assertTrue(confirm.tap(1_500L))
         assertFalse(confirm.tap(2_000L))
         assertTrue(confirm.tap(2_500L))
+    }
+
+    @Test
+    fun fingerMovingUpKeepsInnerScrollWhileRowsRemainBelow() {
+        assertTrue(shouldKeepInnerScroll(30f, canScrollDown = true, canScrollUp = true))
+    }
+
+    @Test
+    fun fingerMovingUpHandsBackToPageAtBottom() {
+        assertFalse(shouldKeepInnerScroll(30f, canScrollDown = false, canScrollUp = true))
+    }
+
+    @Test
+    fun fingerMovingDownHandsBackToPageAtTop() {
+        assertFalse(shouldKeepInnerScroll(-30f, canScrollDown = true, canScrollUp = false))
+    }
+
+    @Test
+    fun fingerMovingDownKeepsInnerScrollWhenRowsRemainAbove() {
+        assertTrue(shouldKeepInnerScroll(-30f, canScrollDown = true, canScrollUp = true))
+    }
+
+    @Test
+    fun zeroDeltaUsesUpwardDirection() {
+        assertFalse(shouldKeepInnerScroll(0f, canScrollDown = true, canScrollUp = false))
+        assertTrue(shouldKeepInnerScroll(0f, canScrollDown = true, canScrollUp = true))
+    }
+
+    @Test
+    fun renderRowsIsPausedWhileDragging() {
+        assertFalse(shouldRenderRows(interacting = true))
+    }
+
+    @Test
+    fun renderRowsResumesAfterFingerLeaves() {
+        assertTrue(shouldRenderRows(interacting = false))
+    }
+
+    @Test
+    fun repeatedRefreshesDuringDragStayDeferredUntilInteractionEnds() {
+        var interacting = true
+        var pending = false
+        var rendered = 0
+        fun refresh() {
+            if (shouldRenderRows(interacting)) {
+                pending = false
+                rendered++
+            } else {
+                pending = true
+            }
+        }
+        repeat(5) { refresh() }
+        assertEquals(0, rendered)
+        assertTrue(pending)
+        interacting = false
+        refresh()
+        assertEquals(1, rendered)
+        assertFalse(pending)
     }
 }
