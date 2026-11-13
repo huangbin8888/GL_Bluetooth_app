@@ -22,6 +22,14 @@ object GuangluCaliperHandler : CaliperDevice {
     private val ACK = Regex("^(MEAS|CLR|MOD|NAM):(OK|ERR)$")
     private val NAME_SUFFIX = Regex("^[A-Za-z0-9_-]+$")
 
+    /** 扫描名称取缓存名，缺失时回退广播名。 */
+    fun pickBroadcastName(cachedName: String?, advertisedName: String?): String? =
+        cachedName?.takeIf { it.isNotBlank() } ?: advertisedName?.takeIf { it.isNotBlank() }
+
+    /** 判定广播名是否属于广陆卡尺。 */
+    fun matchesBroadcastName(name: String?, prefix: String = NAME_PREFIX): Boolean =
+        !name.isNullOrBlank() && name.startsWith(prefix)
+
     /** 按帧头切分协议帧 */
     val FRAME_START_PATTERN = Regex(
         "DAT0:|DAT1:|MEAS:OK|MEAS:ERR|CLR:OK|CLR:ERR|MOD:OK|MOD:ERR|NAM:OK|NAM:ERR"

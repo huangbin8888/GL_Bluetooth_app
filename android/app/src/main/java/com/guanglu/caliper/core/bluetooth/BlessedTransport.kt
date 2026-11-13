@@ -23,7 +23,8 @@ import java.util.concurrent.ConcurrentHashMap
  */
 class BlessedTransport(
     context: Context,
-    private val namePrefix: String = GuangluCaliperHandler.NAME_PREFIX
+    private val namePrefix: String = GuangluCaliperHandler.NAME_PREFIX,
+    private val onDiagnostic: (String) -> Unit = {}
 ) : BleTransport {
 
     private val appContext = context.applicationContext
@@ -36,16 +37,24 @@ class BlessedTransport(
 
     private val centralCallback = object : BluetoothCentralManagerCallback() {
         override fun onDiscoveredPeripheral(peripheral: BluetoothPeripheral, scanResult: ScanResult) {
-            val name = peripheral.name ?: return
-            if (!name.startsWith(namePrefix)) return
+            val cachedName = peripheral.name
+            val advertisedName = scanResult.scanRecord?.deviceName
+            val name = GuangluCaliperHandler.pickBroadcastName(cachedName, advertisedName)
+            if (name == null || !GuangluCaliperHandler.matchesBroadcastName(name, namePrefix)) {
+                onDiagnostic("SCAN_SKIP ${peripheral.address} cached=$cachedName advertised=$advertisedName")
+                return
+            }
+            onDiagnostic("SCAN_HIT ${peripheral.address} name=$name rssi=${scanResult.rssi}")
             onDevice(ScannedDevice(peripheral.address, name, scanResult.rssi))
         }
 
         override fun onConnectedPeripheral(peripheral: BluetoothPeripheral) {
             peripherals[peripheral.address] = peripheral
+            onDiagnostic("CONNECT_OK ${peripheral.address}")
         }
 
         override fun onConnectionFailed(peripheral: BluetoothPeripheral, status: HciStatus) {
+            onDiagnostic("CONNECT_FAIL ${peripheral.address} $status")
             peripherals.remove(peripheral.address)
             callbacks.remove(peripheral.address)
                 ?.onConnectionFailed(peripheral.address, status.toString())
@@ -114,16 +123,19 @@ class BlessedTransport(
 
     override fun startScan(onDevice: (ScannedDevice) -> Unit) {
         this.onDevice = onDevice
+        onDiagnostic("SCAN_START")
         central.scanForPeripherals()
     }
 
     override fun stopScan() {
         central.stopScan()
+        onDiagnostic("SCAN_STOP")
     }
 
     override fun connect(mac: String, callback: BleConnectionCallback) {
         // 连接前停止扫描
         central.stopScan()
+        onDiagnostic("CONNECT_REQ $mac")
         callbacks[mac] = callback
         val peripheral = central.getPeripheral(mac)
         peripherals[mac] = peripheral

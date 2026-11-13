@@ -1,6 +1,6 @@
 # 蓝牙卡尺测量数据助手 · App 需求规格说明书（草案·待确认）
 
-> 版本：v0.11 · 日期：2026-11-13 · 状态：**需求已确认 · 通道回退 7 路 · 蓝牙配置边界已定 · 真编译 + 39 项 JVM 单测全通过、debug APK 已产出；正式代码审计完成；真机反馈的界面显示不全已修复；Web 版 UI 一比一样式复刻（原生 View 重绘）已完成（M0 实机验证仍缺）**
+> 版本：v0.12 · 日期：2026-11-13 · 状态：**需求已确认 · 通道回退 7 路 · 蓝牙配置边界已定 · 真编译 + 44 项 JVM 单测全通过、debug APK 已产出；正式代码审计完成；真机反馈的界面显示不全已修复；Web 版 UI 一比一样式复刻（原生 View 重绘）已完成；蓝牙连接无反馈已修复（M0 实机验证仍缺）**
 > 依据：① 你的口述需求与 2026-11-12 确认；②《广陆蓝牙设备数字化接口_通用.doc》（标题：试验设备数据通信接口标准模板）；③ [GitHub开源案例调研.md](./GitHub开源案例调研.md)；④ [V1开发基线.md](./V1开发基线.md)
 > 标注约定：**「原话」= 你明确提出的需求**；**【AI建议】= 我补的，需要你拍板**。
 >
@@ -19,6 +19,8 @@
 > **v0.10 变更（纯追加 + 状态行修订）**：用户真机安装后反馈「界面显示不全」（截图可核查：顶部 7 个页面按钮只露出 P1–P4、控制按钮文字折行、采集页列表固定 360dp 造成大片空白把「设置 / 导出」推到屏幕下缘、根布局无内边距）。本轮只改 UI 布局，不动需求范围 / 接口协议 / 分层约束：① 顶部 P1–P7 与底部 4 个标签改为紧凑按钮按权重等分，一屏全部可见并高亮当前页；② 采集页改为「固定头部 + 自适应列表 + 固定底栏」，空列表显示「暂无记录」提示，消除空白断层；③ 4 组横向按钮行统一等分单行；④ 根布局按系统栏 inset 加内边距；⑤ `versionCode` 1→2、`versionName` `0.1.0-m0`→`0.1.1`。**重新真编译 BUILD SUCCESSFUL、39 项单测 0 失败，[dist/gl-caliper-debug.apk](./dist/gl-caliper-debug.apk) 已重建**（SHA-256 `50490fad…`）。本机未连接真机 / 模拟器，渲染效果需装机复核；M0 实机验证仍全部阻塞。详见 [V1开发基线.md](./V1开发基线.md) 第 16 节。
 >
 > **v0.11 变更（纯追加 + 状态行修订）**：用户「用web版ui做一比一的样式复刻」。技术决策：**保持技术路线 C（纯原生 Kotlin + Room + blessed-android + SAF）不变，不用 WebView 替换业务链路**；用原生 View 重绘 [demo/index.html](./demo/index.html) 的 CSS 设计系统。新增 `ui/WebUi.kt` 组件库，`MainActivity.kt` 改为 appbar(54dp) + viewport(12dp) + tabbar(56dp) 三段式，`Pages.kt` P1–P7 按 web 原型重排，`AppContainer` 增 `disconnectAll()`；`versionCode` 2→3、`versionName` `0.1.1`→`0.2.0`。**重新真编译 BUILD SUCCESSFUL in 28s、39 项单测 0 失败，[dist/gl-caliper-debug.apk](./dist/gl-caliper-debug.apk) 已重建**（SHA-256 `8cf30210…`）；静态自检行宽 / 注释 / 异常 / 日志 / 函数长度均为 0 违例。需求范围、18 项功能清单、12 项必补约束、7 条分层约束、蓝牙配置硬边界一条未改。本机无真机 / 模拟器，一比一视觉效果仍需装机截图复核；M0 实机验证仍全部阻塞。详见 [V1开发基线.md](./V1开发基线.md) 第 17 节与审计报告第 12 节。
+>
+> **v0.12 变更（纯追加 + 状态行修订）**：用户装机后反馈「蓝牙链接没反应」。定位到扫描 / 连接链路的静默失败：① 扫描结果只取 `BluetoothPeripheral.name`，Android 12+ 该值为 null 时整批丢弃；② 点击扫描后界面无任何状态、无超时、无失败原因；③ 连接无服务发现回调时 `connectingMac` 永久挂起，后续所有连接被吞。修复：广播名从 `ScanRecord` 回退、被过滤设备写诊断日志、`AppContainer.scanReadiness()` 就绪检查、P1 全程可见反馈与 10 秒超时、`ChannelManager` 15 秒连接超时兜底并给 `pumpConnections()` 加锁。新增 5 项回归单测（总数 39→44），并做变异检查（移除修复后 5 项中 3 项按预期失败、恢复后全通过）。`versionCode` 3→4、`versionName` `0.2.0`→`0.2.1`，[dist/gl-caliper-debug.apk](./dist/gl-caliper-debug.apk) 已重建（SHA-256 `bd5af6e6…`）。需求范围、18 项功能清单、12 项必补约束、7 条分层约束、技术路线 C、Web UI 视觉一条未改。详见 [V1开发基线.md](./V1开发基线.md) 第 18 节与审计报告第 13 节。**本机无真机 / 卡尺实物，运行时 BLE 链路仍未验证**；若装机后仍连不上，请回传 P4 导出的诊断日志（含 `SCAN_START` / `SCAN_HIT` / `SCAN_SKIP` / `CONNECT_*`）。
 
 ---
 
@@ -465,3 +467,49 @@
 - 布局按 dp 对齐 web 的 px 设计值，但 Android 字体度量、dpi 换算、状态栏高度与浏览器 CSS 渲染不可能逐像素相同；「一比一」指**配色 / 圆角 / 间距 / 组件层级 / 页面结构 / 交互位置**对齐，不承诺像素级一致。
 - **M0 实机验证全部阻塞项不变**：卡尺实物 / Android 真机 / BLE 抓包 / 7 路并发上限实测 / `DAT0:OK` 回包时机与帧尾 / `NAM` 格式 / HID 实链 / release v1+v2+v3 签名。**APK 能安装 ≠ 蓝牙链路已验证**。
 - 审计报告第 7 节遗留项（存量命名前缀、Activity Result API 迁移、覆盖率 80%、Espresso、debug 仅 v2 签名）本轮未改。
+
+---
+
+## ⑲ 蓝牙连接无反馈修复（v0.12 · 2026-11-13）
+
+> 本节为**纯追加**：第 0–⑱ 节的结论、18 项功能清单、12 项必补约束、用户原话一条未删。只修「点了没反应」这条因果链，不改需求范围、不改技术路线 C、不改接口协议、不改 7 条分层约束、不改 Web UI 视觉。
+
+### 19.1 症状与诊断台账
+
+用户安装 `0.2.0` 后反馈「蓝牙链接没反应」——点击扫描 / 连接后界面无任何变化。本机 `adb devices` 为空，无法读取用户手机 logcat，因此以**代码路径静态证据 + 区分性检查**定位：
+
+| 观察 | 候选 | 预测证据 | 区分检查 | 结果 |
+| --- | --- | --- | --- | --- |
+| 点击后无反馈 | C1 P1 按钮未绑定点击或尺寸为 0 | `webButton` 无 `setOnClickListener` / LayoutParams 宽高 0 | 读 `WebUi.kt` 159–212 | `setOnClickListener { onClick() }` 存在、`webBtnRow` 给 `width=0,weight=1` → **rejected** |
+| 同上 | C2 APK 未声明 BLE 运行时权限 | Manifest / badging 缺 `BLUETOOTH_SCAN` / `CONNECT` | 读 Manifest + `aapt2 dump badging` | 两者均有，且 `neverForLocation` → **rejected** |
+| 同上 | C3 扫描结果被静默丢弃 + UI 无状态反馈 | `peripheral.name ?: return`；点击后不显示「扫描中」，无超时 / 失败原因 | 读 `BlessedTransport.kt` 37–42、`Pages.connect()` | 名称 null 直接 return、前缀不匹配直接 return 且**无任何日志**；点击后 UI 不显示任何状态 → **proven（代码层静默路径存在）** |
+| 同上 | C4 连接挂起后吞掉后续连接 | `pumpConnections()` 遇 `connectingMac != null` 直接 return；仅 3 个回调清空、无超时 | 读 `ChannelManager.kt` | 无超时兜底；`onDisconnected` 还不清 `connectingMac` → **proven（代码层挂起路径存在）** |
+| 同上 | C5 环境：无卡尺实物 / 蓝牙未开 / 权限被拒 / 定位开关关 | 本机 `adb devices` 空；M0 清单明确「卡尺实物 + 真机 + BLE 抓包」未就位 | `adb devices` + 基线 M0 | `List of devices attached` 为空，用户手机运行时状态不可观测 → **plausible（触发路径需运行时证据）** |
+
+**结论**：C3 / C4 是可证实的真实缺陷；C5 的触发与否无法从本机判定。因此本轮既修掉静默路径，也把每个失败原因变成用户可见提示，让下一步能自证到底是哪一种。
+
+### 19.2 修复内容
+
+| 位置 | 修复 |
+| --- | --- |
+| `GuangluCaliperHandler` | 新增纯函数 `pickBroadcastName()` / `matchesBroadcastName()`：缓存名为空时回退 `ScanRecord.deviceName`，仍只接受 `GL-BLE#` 前缀 |
+| `BlessedTransport` | 扫描回调改用上述判定；`SCAN_START` / `SCAN_STOP` / `SCAN_HIT` / `SCAN_SKIP` / `CONNECT_REQ` / `CONNECT_OK` / `CONNECT_FAIL` 全部写入诊断日志（P4 可导出） |
+| `AppContainer` | 新增 `scanReadiness()` 门面：检查蓝牙开关、API 31+ 的 `BLUETOOTH_SCAN/CONNECT`、API ≤30 的定位权限与定位总开关，返回明确中文原因 |
+| `Pages.connect()` + 新增 `ConnectParts.kt` | 点击扫描先做就绪检查并提示原因；立即显示「正在扫描…」与 toast；发现设备实时更新数量；10 秒未发现显示排查指引；点击设备提示「正在连接」；离开 P1 自动停扫描并清理定时器 |
+| `ChannelManager` | 新增 15 秒连接超时兜底（可注入，便于测试），超时释放槽位并上报事件；`onDisconnected` 清理 `connectingMac`；`pumpConnections()` 加 `@Synchronized` 防止定时器与 BLE 回调并发竞态 |
+| `app/build.gradle.kts` | `versionCode` 3→4、`versionName` `0.2.0`→`0.2.1` |
+
+### 19.3 验证证据
+
+- 新增 `ScanFilterTest`（4 项）与 `ConnectTimeoutTest`（1 项）；单测总数 **39 → 44，0 failures / 0 errors / 0 skipped**（`--no-build-cache` 真实执行）。
+- **变异检查**：临时把 `pickBroadcastName` 退回「只取缓存名」并移除连接超时调用 → `5 tests completed, 3 failed`，失败原因分别为「expected GL-BLE#… but was null」与「第二次连接未被触发」；恢复后用 SHA-256 校验源码逐字节还原，44 项全通过。
+- `gradle :app:testDebugUnitTest :app:assembleDebug --no-build-cache --no-daemon` → `BUILD SUCCESSFUL in 25s`，`e:` 错误 0。
+- `dist/gl-caliper-debug.apk` 3.2 MB，SHA-256 `bd5af6e6c216fe28960273f5b88432c565d4a4fa17c8b2696b995d76252714a9`；`aapt2` → `versionCode='4' versionName='0.2.1'` / minSdk 26 / targetSdk 36 / 无 `BLUETOOTH_ADVERTISE`；`apksigner verify` → `Verifies`（v2）。
+- 全量静态自检：行宽 >120、内联全限定类名、裸 `catch(Exception)`、日志直调、行尾注释、缺 `@author`、括号不平衡、函数 >80 行、类 >800 行均为 0；7 条分层约束逐条 PASS（`ui/` 仍无蓝牙 / Room import，DB 写入仍只 3 处 usecase，`MAX_CHANNELS = 7` 不变，SAF 无硬编码路径）。
+
+### 19.4 如实未验证与边界
+
+- **本机无 Android 真机 / 卡尺实物 / BLE 抓包**，运行时扫描与连接是否成功仍未验证；`adb devices` 返回空列表。若装 `0.2.1` 后仍连不上，请回传 P4 导出的诊断日志：`SCAN_SKIP` 有记录说明扫到了但名称不匹配，`SCAN_HIT` 有记录说明设备已进入列表，`CONNECT_REQ` 后无 `CONNECT_OK` 说明连接层失败。
+- 切走 P1 页面会停止扫描并清空本次发现列表，切回需重新扫描（防止后台扫描与 Android 30 秒 5 次扫描限制）。
+- M0 实机验证全部阻塞项不变；审计报告第 7 节遗留项不变；本轮另发现 `AppDatabase.kt` / `Entities.kt` 两处存量类级 JavaDoc 含 why / 基线编号注释，不在本轮因果链内，未改动，已在审计报告第 13 节记录。
+- **APK 可安装 ≠ 蓝牙链路已验证**。

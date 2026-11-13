@@ -10,8 +10,11 @@ import com.guanglu.caliper.core.bluetooth.device.GuangluCaliperHandler
 import com.guanglu.caliper.core.model.CaliperFrame
 import com.guanglu.caliper.core.model.ChannelPalette
 import java.util.Timer
+import java.util.TimerTask
 import java.util.concurrent.ConcurrentHashMap
 import kotlin.concurrent.schedule
+
+private const val CONNECT_TIMEOUT_MS = 15_000L
 
 sealed class ChannelEvent {
     data class Connected(val channelNo: Int, val mac: String) : ChannelEvent()
@@ -33,7 +36,8 @@ class ChannelManager(
     private val driver: CaliperDevice = GuangluCaliperHandler,
     private val onMeasurement: (Int, String, CaliperFrame.Measurement) -> Unit,
     private val onEvent: (ChannelEvent) -> Unit = {},
-    private val onDiagnostic: (String) -> Unit = {}
+    private val onDiagnostic: (String) -> Unit = {},
+    private val connectTimeoutMs: Long = CONNECT_TIMEOUT_MS
 ) : BleConnectionCallback {
 
     val allocator = ChannelAllocator()
@@ -41,6 +45,7 @@ class ChannelManager(
     private val slots = ConcurrentHashMap<String, ChannelSlot>()
     private val lastCommand = ConcurrentHashMap<String, ByteArray>()
     private val retryCount = ConcurrentHashMap<String, Int>()
+    private val connectTimers = ConcurrentHashMap<String, TimerTask>()
     private val retryTimer = Timer("cmd-retry", true)
 
     @Volatile
@@ -69,11 +74,39 @@ class ChannelManager(
         return true
     }
 
+    @Synchronized
     private fun pumpConnections() {
         if (connectingMac != null) return
         val mac = pendingConnections.removeFirstOrNull() ?: return
         connectingMac = mac
+        armConnectTimeout(mac)
         transport.connect(mac, this)
+    }
+
+    private fun armConnectTimeout(mac: String) {
+        connectTimers.remove(mac)?.cancel()
+        val task = retryTimer.schedule(connectTimeoutMs) {
+            if (connectingMac == mac) {
+                connectingMac = null
+                connectTimers.remove(mac)
+                val slotNo = allocator.release(mac) ?: 0
+                slots.remove(mac)
+                commandQueue.cancelFor(mac)
+                onEvent(
+                    ChannelEvent.Disconnected(
+                        slotNo,
+                        mac,
+                        "连接超时（${connectTimeoutMs / 1000}s 未收到服务发现回调）"
+                    )
+                )
+                pumpConnections()
+            }
+        }
+        connectTimers[mac] = task
+    }
+
+    private fun clearConnectTimeout(mac: String) {
+        connectTimers.remove(mac)?.cancel()
     }
 
     /** 60ms 帧尾 flush 轮询入口，由 AppContainer 的定时器驱动。 */
@@ -114,6 +147,8 @@ class ChannelManager(
 
     /** 释放所有通道、待发命令与重试任务。 */
     fun close() {
+        connectTimers.values.forEach { it.cancel() }
+        connectTimers.clear()
         retryTimer.cancel()
         pendingConnections.clear()
         connectingMac = null
@@ -131,6 +166,7 @@ class ChannelManager(
     // ---- BleConnectionCallback ----
 
     override fun onReady(mac: String) {
+        clearConnectTimeout(mac)
         connectingMac = null
         val slotNo = allocator.slotOf(mac) ?: return
         slots[mac] = ChannelSlot(driver, sinkFor(mac))
@@ -145,6 +181,8 @@ class ChannelManager(
     }
 
     override fun onDisconnected(mac: String, reason: String) {
+        clearConnectTimeout(mac)
+        if (connectingMac == mac) connectingMac = null
         val slotNo = allocator.release(mac) ?: 0
         slots.remove(mac)
         commandQueue.cancelFor(mac)
@@ -154,6 +192,7 @@ class ChannelManager(
     }
 
     override fun onConnectionFailed(mac: String, reason: String) {
+        clearConnectTimeout(mac)
         val slotNo = allocator.release(mac) ?: 0
         slots.remove(mac)
         commandQueue.cancelFor(mac)

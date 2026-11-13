@@ -140,21 +140,7 @@ object Pages {
         val page = screen(context)
         val col = page.col()
         val state = webBold("已连接 0 / 7 通道", 13f)
-        val statusCard = webCard(true)
-        val statusRow = LinearLayout(context).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-        }
-        statusRow.addView(
-            View(context).apply { background = webDrawable(Web.OK, dp(4).toFloat()) },
-            LinearLayout.LayoutParams(dp(8), dp(8))
-        )
-        statusRow.addView(state, even(context).apply { marginStart = dp(9) })
-        statusRow.addView(webChip("GL-BLE# 前缀 · 上限 7", WebTone.BLUE))
-        statusCard.addView(statusRow)
-        statusCard.addView(webTiny("上次连接：7 路按上次 MAC 自动重连"))
-        col.addView(statusCard)
-
+        col.addView(connectHeader(context, state))
         col.addView(webBanner("长按卡尺红色 data 键 3 秒，液晶闪 OK 后开始扫描。\n最多同时连接 7 台，第 8 台扫描到也不连接并提示通道已满。", WebTone.BLUE))
         col.addView(webBanner("蓝牙 / 定位权限未确认，或系统定位总开关关闭时扫描不到设备。", WebTone.WARN))
         col.addView(webBtnRow(webButton("去系统设置", small = true) { actions.openSystemSettings() }))
@@ -162,32 +148,44 @@ object Pages {
 
         val listCard = webCard()
         listCard.addView(webCardTitle("附近设备"))
+        val hint = webTiny("尚未扫描")
+        listCard.addView(hint)
         val found = mutableListOf<ScannedDevice>()
         val list = LinearLayout(context).apply { orientation = LinearLayout.VERTICAL }
-        val handler = Handler(Looper.getMainLooper())
         listCard.addView(list)
         col.addView(listCard)
-
-        val slotsCard = webCard()
-        slotsCard.addView(webCardTitle("通道槽位 CH1–CH7"))
         val slotLabels = mutableListOf<TextView>()
-        for (i in 1..ChannelPalette.MAX_CHANNELS) {
-            val label = webTiny("CH$i · 空闲")
-            slotLabels.add(label)
-            slotsCard.addView(label)
-        }
-        col.addView(slotsCard)
+        col.addView(channelSlotsCard(context, slotLabels))
 
+        val handler = Handler(Looper.getMainLooper())
+        var pendingTimeout: Runnable? = null
+        fun stopScan() {
+            pendingTimeout?.let { handler.removeCallbacks(it) }
+            pendingTimeout = null
+            c.stopScan()
+        }
+        stopScanOnDetach(page) { stopScan() }
         col.addView(webBtnRow(
             webButton("扫描设备", primary = true) {
+                val reason = c.scanReadiness()
+                if (reason != null) {
+                    actions.toast(reason)
+                    hint.text = reason
+                    return@webButton
+                }
+                stopScan()
                 found.clear()
                 list.removeAllViews()
+                hint.text = "正在扫描… 长按卡尺 data 键 3 秒后等待广播"
+                actions.toast("开始扫描 GL-BLE# 卡尺")
                 c.startScan { device ->
                     handler.post {
                         if (found.any { it.mac == device.mac }) return@post
                         found.add(device)
+                        hint.text = "发现 ${found.size} 台卡尺，点设备名连接"
                         val title = "${device.name} · ${device.mac.takeLast(4)} · ${device.rssi}dBm"
                         list.addView(webButton(title, small = true) {
+                            actions.toast("正在连接 ${device.mac.takeLast(4)}…")
                             if (!c.connect(device.mac)) {
                                 actions.toast("通道已满，未连接 ${device.mac.takeLast(4)}")
                             }
@@ -195,6 +193,9 @@ object Pages {
                         })
                     }
                 }
+                val timeout = scanTimeout(c, found, hint, actions) { pendingTimeout = null }
+                pendingTimeout = timeout
+                handler.postDelayed(timeout, SCAN_TIMEOUT_MS)
             },
             webButton("全部断开", danger = true) {
                 c.disconnectAll()
@@ -202,13 +203,16 @@ object Pages {
             }
         ))
         col.addView(webButton("连接全部 7 台") {
-            found.take(ChannelPalette.MAX_CHANNELS).forEach { c.connect(it.mac) }
+            val targets = found.take(ChannelPalette.MAX_CHANNELS)
+            if (targets.isEmpty()) {
+                actions.toast("请先点『扫描设备』并等待列表出现卡尺")
+                return@webButton
+            }
+            targets.forEach { c.connect(it.mac) }
+            actions.toast("正在连接 ${targets.size} 台卡尺")
             refreshConnect(c, state, slotLabels)
         })
-        col.addView(webTiny(
-            "机型适配：连接前先停止扫描；Android 限制 30 秒内最多 5 次扫描；重连后重新发现服务并订阅 notify。\n" +
-                "7 路 GATT 走串行命令队列；单通道断连不影响其他通道继续采集。"
-        ))
+        col.addView(connectFooter(context))
         refreshConnect(c, state, slotLabels)
         page
     }
