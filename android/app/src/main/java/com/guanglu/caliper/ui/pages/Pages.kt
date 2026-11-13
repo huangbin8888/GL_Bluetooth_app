@@ -298,17 +298,28 @@ object Pages {
         }
         var continuous = false
         val modeButton = webButton("切换为连续") {}
+
+        fun send(command: CaliperCommand, label: String): Boolean {
+            val ok = c.sendCommand(1, command)
+            if (!ok) actions.toast("CH1 未连接卡尺，$label 未下发；请先到「连接」页连接")
+            return ok
+        }
+
         modeButton.setOnClickListener {
-            continuous = !continuous
-            c.sendCommand(1, if (continuous) CaliperCommand.MOD_CONTINUOUS else CaliperCommand.MOD_MANUAL)
-            modeButton.text = if (continuous) "切换为手动" else "切换为连续"
+            val target = if (continuous) CaliperCommand.MOD_MANUAL else CaliperCommand.MOD_CONTINUOUS
+            if (send(target, "模式切换")) {
+                continuous = !continuous
+                modeButton.text = if (continuous) "切换为手动" else "切换为连续"
+            }
         }
         listOf(
             seg,
-            webButton("记录一条（主通道）", primary = true) { c.sendCommand(1, CaliperCommand.MEAS) },
+            webButton("记录一条（主通道）", primary = true) {
+                send(CaliperCommand.MEAS, "记录一条")
+            },
             webBtnRow(
-                webButton("发一次采集 MEAS") { c.sendCommand(1, CaliperCommand.MEAS) },
-                webButton("清零 CLR") { c.sendCommand(1, CaliperCommand.CLR) }
+                webButton("发一次采集 MEAS") { send(CaliperCommand.MEAS, "采集 MEAS") },
+                webButton("清零 CLR") { send(CaliperCommand.CLR, "清零 CLR") }
             ),
             webBtnRow(modeButton, webButton("设置") { actions.setPage("P7") }),
             webBtnRow(

@@ -44,13 +44,13 @@ class CommandQueue(private val write: (String, ByteArray) -> Boolean) {
     fun pendingCount(): Int = queue.size + if (inFlight == null) 0 else 1
 
     private fun drain() {
-        if (inFlight != null) return
-        val entry = queue.removeFirstOrNull() ?: return
-        inFlight = entry
-        if (!write(entry.mac, entry.bytes)) {
-            inFlight = null
-            entry.onResult(false)
-            drain()
+        while (inFlight == null) {
+            val entry = queue.removeFirstOrNull() ?: return
+            inFlight = entry
+            if (!write(entry.mac, entry.bytes)) {
+                inFlight = null
+                entry.onResult(false)
+            }
         }
     }
 }

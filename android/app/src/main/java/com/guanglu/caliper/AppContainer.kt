@@ -26,6 +26,7 @@ import com.guanglu.caliper.core.usecase.DeviceConfigUseCase
 import com.guanglu.caliper.core.usecase.DiagnosticsUseCase
 import com.guanglu.caliper.core.usecase.HidKeyboardInputUseCase
 import com.guanglu.caliper.core.usecase.ImportExportUseCases
+import java.util.concurrent.ConcurrentHashMap
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -52,7 +53,7 @@ class AppContainer(context: Context) {
     val capture = CaptureMeasurementsUseCase(
         dao = database.measurementDao(),
         settings = settings,
-        onStored = { count -> uiEvent("已落库 $count 条") },
+        onStored = { count -> diagnostics.log("STORE $count") },
         onDiagnostic = { diagnostics.log(it) }
     )
 
@@ -73,20 +74,29 @@ class AppContainer(context: Context) {
     // ---- UI 门面 ----
     fun startScan(onDevice: (ScannedDevice) -> Unit) = channelManager.startScan(onDevice)
     fun stopScan() = channelManager.stopScan()
-    fun connect(mac: String): Boolean = channelManager.requestConnect(mac)
+    fun connect(mac: String): Boolean {
+        resetReconnect(mac)
+        return channelManager.requestConnect(mac)
+    }
     fun sendCommand(channelNo: Int, command: CaliperCommand): Boolean =
         channelManager.sendCommand(channelNo, command)
     fun applyNam(channelNo: Int, name: String): Boolean = channelManager.applyNam(channelNo, name)
     fun onlineCount(): Int = channelManager.onlineCount()
     fun channelSlots(): Map<Int, String> = channelManager.channelSlots()
-    fun disconnectAll(): Int = channelManager.disconnectAll()
+    fun disconnectAll(): Int {
+        cancelAllReconnects()
+        return channelManager.disconnectAll()
+    }
 
     /** 自动连接上次连接过的卡尺；返回未执行的原因，null 表示已受理或无需连接。
-     *  幂等：已在线或正在排队的 MAC 会被跳过，可安全地被 onStart / 权限回调 / 掉线重连反复调用。 */
+     *  跳过已在线或正在排队的 MAC，5 秒内重复调用直接返回。 */
     fun autoConnectKnown(): String? {
         if (!settings.autoConnect) return "自动重连已关闭（设置 · 采集行为可开启）"
         val reason = scanReadiness()
         if (reason != null) return reason
+        val now = System.currentTimeMillis()
+        if (!shouldAutoConnectNow(lastAutoConnectMs, now)) return null
+        lastAutoConnectMs = now
         scope.launch {
             val online = channelManager.channelSlots().values.toSet()
             val pending = channelManager.pendingMacs()
@@ -95,24 +105,63 @@ class AppContainer(context: Context) {
             targets.forEach { channelManager.requestConnect(it.mac) }
             if (targets.isNotEmpty()) {
                 diagnostics.log("AUTO_CONNECT ${targets.size} ${targets.joinToString { it.mac }}")
-                uiEvent("自动连接上次的 ${targets.size} 台卡尺…")
+                if (eventThrottle.allow("auto_connect")) {
+                    uiEvent("自动连接上次的 ${targets.size} 台卡尺…")
+                }
             }
         }
         return null
     }
 
-    /** 用户主动断开与空闲断连不重连；其余掉线（信号丢失 / 超时 / 失败）延迟 1.5s 后自动重连一次。
-     *  受 15s 连接超时与槽位约束兜底，重复失败不会死循环。 */
-    private val ignoredReconnectReasons = RECONNECT_IGNORED_REASONS
+    /** 掉线后按有限预算自动重连。 */
     private fun maybeReconnect(mac: String, reason: String) {
         scope.launch {
             val online = channelManager.channelSlots().values.toSet()
             val pending = channelManager.pendingMacs()
             val known = deviceConfig.recentDevices(ChannelPalette.MAX_CHANNELS).any { it.mac == mac }
-            if (shouldAutoReconnect(settings.autoConnect, mac, reason, online, pending, known)) {
-                diagnostics.log("AUTO_RECONNECT $mac ($reason)")
-                mainHandler.postDelayed({ channelManager.requestConnect(mac) }, 1500L)
+            var stopped = false
+            var attempts = 0
+            synchronized(reconnectLock) {
+                attempts = reconnectAttempts[mac] ?: 0
+                if (shouldAutoReconnect(
+                        settings.autoConnect, mac, reason, online, pending, known, attempts
+                    )
+                ) {
+                    reconnectAttempts[mac] = attempts + 1
+                    diagnostics.log("AUTO_RECONNECT $mac attempt=${attempts + 1}/$MAX_AUTO_RECONNECT ($reason)")
+                    val task = Runnable {
+                        pendingReconnects.remove(mac)
+                        channelManager.requestConnect(mac)
+                    }
+                    pendingReconnects[mac] = task
+                    mainHandler.postDelayed(task, AUTO_RECONNECT_DELAY_MS)
+                } else if (attempts >= MAX_AUTO_RECONNECT) {
+                    stopped = reconnectStopped.add(mac)
+                }
             }
+            if (stopped) {
+                diagnostics.log("AUTO_RECONNECT_STOP $mac attempts=$attempts")
+                uiEvent("已停止重连 ${mac.takeLast(4)}：连续 $attempts 次失败，请检查卡尺电量与蓝牙后手动连接")
+            }
+        }
+    }
+
+    /** 连接成功后清零连续失败预算并取消待执行的重连任务。 */
+    private fun resetReconnect(mac: String) {
+        synchronized(reconnectLock) {
+            reconnectAttempts.remove(mac)
+            reconnectStopped.remove(mac)
+            pendingReconnects.remove(mac)?.let { mainHandler.removeCallbacks(it) }
+        }
+    }
+
+    /** 取消全部待重连任务并清零预算，供用户主动断开与 App 关闭时调用。 */
+    private fun cancelAllReconnects() {
+        synchronized(reconnectLock) {
+            pendingReconnects.values.forEach { mainHandler.removeCallbacks(it) }
+            pendingReconnects.clear()
+            reconnectAttempts.clear()
+            reconnectStopped.clear()
         }
     }
 
@@ -148,6 +197,15 @@ class AppContainer(context: Context) {
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val mainHandler = Handler(Looper.getMainLooper())
+    private val reconnectLock = Any()
+    private val reconnectAttempts = ConcurrentHashMap<String, Int>()
+    private val pendingReconnects = ConcurrentHashMap<String, Runnable>()
+    private val reconnectStopped = ConcurrentHashMap.newKeySet<String>()
+    private val eventThrottle = UiEventThrottle()
+
+    @Volatile
+    private var lastAutoConnectMs = 0L
+
     private val idleRunnable = object : Runnable {
         override fun run() {
             val idleMs = settings.idleDisconnectMinutes * 60_000L
@@ -189,6 +247,8 @@ class AppContainer(context: Context) {
 
     fun close() {
         mainHandler.removeCallbacks(idleRunnable)
+        cancelAllReconnects()
+        eventThrottle.clear()
         channelManager.close()
         capture.close()
     }
@@ -196,19 +256,26 @@ class AppContainer(context: Context) {
     private fun handleChannelEvent(event: ChannelEvent) {
         when (event) {
             is ChannelEvent.Connected -> {
+                resetReconnect(event.mac)
                 settings.lastMac = event.mac
                 deviceConfig.registerConnected(event.mac, "GL-BLE#${event.mac.takeLast(4)}", event.channelNo)
                 uiEvent("CH${event.channelNo} 已连接 ${event.mac}")
             }
             is ChannelEvent.Disconnected -> {
-                uiEvent("CH${event.channelNo} 断开：${event.reason}")
+                if (eventThrottle.allow("disconnect:${event.mac}")) {
+                    uiEvent("CH${event.channelNo} 断开：${event.reason}")
+                }
                 maybeReconnect(event.mac, event.reason)
             }
-            is ChannelEvent.Rejected -> uiEvent(event.reason)
+            is ChannelEvent.Rejected -> {
+                if (eventThrottle.allow("reject:${event.mac}")) uiEvent(event.reason)
+            }
             is ChannelEvent.LimitReached -> uiEvent("已达该机型并发上限 ${event.actual}，剩余设备未连接；已连通道继续采集")
-            is ChannelEvent.Ack -> uiEvent(
-                "CH${event.channelNo} ${event.command} ${if (event.ok) "OK" else "ERR（重试中）"}"
-            )
+            is ChannelEvent.Ack -> {
+                if (!event.ok && eventThrottle.allow("ack:${event.channelNo}:${event.command}")) {
+                    uiEvent("CH${event.channelNo} ${event.command} ERR（重试中）")
+                }
+            }
             is ChannelEvent.NamResult -> {
                 if (event.ok && event.name.isNotBlank()) {
                     deviceConfig.renameDevice(event.mac, event.name)
@@ -222,21 +289,63 @@ class AppContainer(context: Context) {
     }
 }
 
-/** 用户主动断开与空闲断连这两个原因下不自动重连；其余掉线（信号丢失 / 超时 / 失败）才考虑重连。 */
-internal val RECONNECT_IGNORED_REASONS = setOf("用户断开", "空闲自动断连")
+/** 自动重连次数上限与两次调度间隔。 */
+internal const val MAX_AUTO_RECONNECT = 3
+internal const val AUTO_RECONNECT_DELAY_MS = 1_500L
+internal const val AUTO_CONNECT_COOLDOWN_MS = 5_000L
 
-/** 是否应在掉线后自动重连：纯函数，供单测直接覆盖决策。
- *  自动重连关闭、用户/空闲主动断开、已在在线或排队集合、或未知设备，都不重连。 */
+/** 主动断连原因前缀。 */
+internal val RECONNECT_IGNORED_PREFIXES = listOf("用户断开", "空闲自动断连")
+
+/** 判定断连原因是否属于主动断开。 */
+internal fun isManualDisconnect(reason: String): Boolean =
+    RECONNECT_IGNORED_PREFIXES.any { reason.startsWith(it) }
+
+/** 判定是否应在掉线后自动重连；attempts 为已连续失败重连次数。 */
 internal fun shouldAutoReconnect(
     autoConnect: Boolean,
     mac: String,
     reason: String,
     online: Set<String>,
     pending: Set<String>,
-    known: Boolean
+    known: Boolean,
+    attempts: Int = 0,
+    maxAttempts: Int = MAX_AUTO_RECONNECT
 ): Boolean {
     if (!autoConnect) return false
-    if (reason in RECONNECT_IGNORED_REASONS) return false
+    if (isManualDisconnect(reason)) return false
     if (mac in online || mac in pending) return false
-    return known
+    if (!known) return false
+    return attempts < maxAttempts
+}
+
+/** 判定是否距上次自动补连已超过冷却窗口。 */
+internal fun shouldAutoConnectNow(
+    lastMs: Long,
+    nowMs: Long,
+    cooldownMs: Long = AUTO_CONNECT_COOLDOWN_MS
+): Boolean = nowMs - lastMs >= cooldownMs
+
+/**
+ * UI 事件节流：相同 key 在窗口期内只放行一次。
+ *
+ * @author AI-Generated
+ */
+internal class UiEventThrottle(
+    private val windowMs: Long = 1_500L,
+    private val clock: () -> Long = { System.currentTimeMillis() }
+) {
+    private val lastAt = HashMap<String, Long>()
+
+    @Synchronized
+    fun allow(key: String): Boolean {
+        val now = clock()
+        val last = lastAt[key]
+        if (last != null && now - last < windowMs) return false
+        lastAt[key] = now
+        return true
+    }
+
+    @Synchronized
+    fun clear() = lastAt.clear()
 }
