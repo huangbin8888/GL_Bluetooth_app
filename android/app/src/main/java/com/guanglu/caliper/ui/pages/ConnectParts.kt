@@ -9,6 +9,7 @@ import android.widget.LinearLayout
 import android.widget.TextView
 import com.guanglu.caliper.AppContainer
 import com.guanglu.caliper.core.bluetooth.ScannedDevice
+import com.guanglu.caliper.core.bluetooth.ScanRegistry
 import com.guanglu.caliper.core.model.ChannelPalette
 import com.guanglu.caliper.ui.Web
 import com.guanglu.caliper.ui.WebTone
@@ -61,18 +62,18 @@ internal fun channelSlotsCard(
 
 internal fun scanTimeout(
     c: AppContainer,
-    found: List<ScannedDevice>,
+    countProvider: () -> Int,
     hint: TextView,
     actions: UiActions,
     onDone: () -> Unit
 ): Runnable = Runnable {
     c.stopScan()
     onDone()
-    if (found.isEmpty()) {
+    if (countProvider() == 0) {
         hint.text = "10 秒未发现卡尺：确认卡尺已开机、长按 data 键 3 秒且液晶显示 OK；可在 P4 导出诊断日志查看 SCAN_SKIP"
         actions.toast("未发现卡尺，请查看连接页提示")
     } else {
-        hint.text = "发现 ${found.size} 台，点设备名连接"
+        hint.text = "发现 ${countProvider()} 台，点设备名连接"
     }
 }
 
@@ -91,25 +92,49 @@ internal fun connectFooter(context: Context): TextView = context.run {
 }
 
 /**
- * 连接页扫描会话：就绪检查、可见反馈、10 秒超时与离开页面停扫描。
+ * 连接页扫描会话：就绪检查、MAC 去重（重复广播原地更新）、可见反馈、10 秒超时与离开页面停扫描。
  *
  * @author AI-Generated
  */
 internal class ScanSession(
     private val c: AppContainer,
     private val actions: UiActions,
-    private val found: MutableList<ScannedDevice>,
     private val list: LinearLayout,
     private val hint: TextView,
     private val onConnected: () -> Unit
 ) {
     private val handler = Handler(Looper.getMainLooper())
     private var pendingTimeout: Runnable? = null
+    private val registry = ScanRegistry()
 
     fun stop() {
         pendingTimeout?.let { handler.removeCallbacks(it) }
         pendingTimeout = null
         c.stopScan()
+    }
+
+    /** 清空设备列表并重建（全部断开或重新扫描前调用）。 */
+    fun reset() {
+        registry.clear()
+        rebuild()
+    }
+
+    /** 当前扫描到的设备（按发现顺序）。 */
+    fun devices(): List<ScannedDevice> = registry.devices
+
+    /** 以 MAC 为键重建列表，重复广播原地更新，绝不产生重复条目。 */
+    private fun rebuild() {
+        list.removeAllViews()
+        registry.devices.forEach { device ->
+            val title = "${device.name} · ${device.mac.takeLast(4)} · ${device.rssi}dBm"
+            list.addView(list.context.webButton(title, small = true) {
+                actions.toast("正在连接 ${device.mac.takeLast(4)}…")
+                if (!c.connect(device.mac)) {
+                    actions.toast("通道已满，未连接 ${device.mac.takeLast(4)}")
+                }
+                onConnected()
+            })
+        }
     }
 
     fun start() {
@@ -120,26 +145,18 @@ internal class ScanSession(
             return
         }
         stop()
-        found.clear()
-        list.removeAllViews()
+        registry.clear()
+        rebuild()
         hint.text = "正在扫描… 长按卡尺 data 键 3 秒后等待广播"
         actions.toast("开始扫描 GL-BLE# 卡尺")
         c.startScan { device ->
             handler.post {
-                if (found.any { it.mac == device.mac }) return@post
-                found.add(device)
-                hint.text = "发现 ${found.size} 台卡尺，点设备名连接"
-                val title = "${device.name} · ${device.mac.takeLast(4)} · ${device.rssi}dBm"
-                list.addView(list.context.webButton(title, small = true) {
-                    actions.toast("正在连接 ${device.mac.takeLast(4)}…")
-                    if (!c.connect(device.mac)) {
-                        actions.toast("通道已满，未连接 ${device.mac.takeLast(4)}")
-                    }
-                    onConnected()
-                })
+                registry.add(device)
+                rebuild()
+                hint.text = "发现 ${registry.size} 台卡尺，点设备名连接"
             }
         }
-        val timeout = scanTimeout(c, found, hint, actions) { pendingTimeout = null }
+        val timeout = scanTimeout(c, { registry.size }, hint, actions) { pendingTimeout = null }
         pendingTimeout = timeout
         handler.postDelayed(timeout, SCAN_TIMEOUT_MS)
     }

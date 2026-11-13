@@ -81,28 +81,39 @@ class AppContainer(context: Context) {
     fun channelSlots(): Map<Int, String> = channelManager.channelSlots()
     fun disconnectAll(): Int = channelManager.disconnectAll()
 
-    @Volatile
-    private var autoConnectAttempted = false
-
-    /** 启动时自动连接上次连接过的卡尺；返回未执行的原因，null 表示已受理或已在执行。 */
+    /** 自动连接上次连接过的卡尺；返回未执行的原因，null 表示已受理或无需连接。
+     *  幂等：已在线或正在排队的 MAC 会被跳过，可安全地被 onStart / 权限回调 / 掉线重连反复调用。 */
     fun autoConnectKnown(): String? {
-        if (autoConnectAttempted) return null
-        if (!settings.autoConnect) {
-            autoConnectAttempted = true
-            return null
-        }
+        if (!settings.autoConnect) return "自动重连已关闭（设置 · 采集行为可开启）"
         val reason = scanReadiness()
         if (reason != null) return reason
-        autoConnectAttempted = true
         scope.launch {
-            val devices = deviceConfig.recentDevices(ChannelPalette.MAX_CHANNELS)
-            if (devices.isEmpty()) return@launch
-            val online = channelSlots().values
-            devices.filter { it.mac !in online }.forEach { channelManager.requestConnect(it.mac) }
-            diagnostics.log("AUTO_CONNECT ${devices.size} ${devices.joinToString { it.mac }}")
-            uiEvent("自动连接上次的 ${devices.size} 台卡尺…")
+            val online = channelManager.channelSlots().values.toSet()
+            val pending = channelManager.pendingMacs()
+            val recent = deviceConfig.recentDevices(ChannelPalette.MAX_CHANNELS)
+            val targets = recent.filter { it.mac !in online && it.mac !in pending }
+            targets.forEach { channelManager.requestConnect(it.mac) }
+            if (targets.isNotEmpty()) {
+                diagnostics.log("AUTO_CONNECT ${targets.size} ${targets.joinToString { it.mac }}")
+                uiEvent("自动连接上次的 ${targets.size} 台卡尺…")
+            }
         }
         return null
+    }
+
+    /** 用户主动断开与空闲断连不重连；其余掉线（信号丢失 / 超时 / 失败）延迟 1.5s 后自动重连一次。
+     *  受 15s 连接超时与槽位约束兜底，重复失败不会死循环。 */
+    private val ignoredReconnectReasons = RECONNECT_IGNORED_REASONS
+    private fun maybeReconnect(mac: String, reason: String) {
+        scope.launch {
+            val online = channelManager.channelSlots().values.toSet()
+            val pending = channelManager.pendingMacs()
+            val known = deviceConfig.recentDevices(ChannelPalette.MAX_CHANNELS).any { it.mac == mac }
+            if (shouldAutoReconnect(settings.autoConnect, mac, reason, online, pending, known)) {
+                diagnostics.log("AUTO_RECONNECT $mac ($reason)")
+                mainHandler.postDelayed({ channelManager.requestConnect(mac) }, 1500L)
+            }
+        }
     }
 
     /** 返回无法扫描的原因，null 表示可扫描。 */
@@ -189,7 +200,10 @@ class AppContainer(context: Context) {
                 deviceConfig.registerConnected(event.mac, "GL-BLE#${event.mac.takeLast(4)}", event.channelNo)
                 uiEvent("CH${event.channelNo} 已连接 ${event.mac}")
             }
-            is ChannelEvent.Disconnected -> uiEvent("CH${event.channelNo} 断开：${event.reason}")
+            is ChannelEvent.Disconnected -> {
+                uiEvent("CH${event.channelNo} 断开：${event.reason}")
+                maybeReconnect(event.mac, event.reason)
+            }
             is ChannelEvent.Rejected -> uiEvent(event.reason)
             is ChannelEvent.LimitReached -> uiEvent("已达该机型并发上限 ${event.actual}，剩余设备未连接；已连通道继续采集")
             is ChannelEvent.Ack -> uiEvent(
@@ -206,4 +220,23 @@ class AppContainer(context: Context) {
             }
         }
     }
+}
+
+/** 用户主动断开与空闲断连这两个原因下不自动重连；其余掉线（信号丢失 / 超时 / 失败）才考虑重连。 */
+internal val RECONNECT_IGNORED_REASONS = setOf("用户断开", "空闲自动断连")
+
+/** 是否应在掉线后自动重连：纯函数，供单测直接覆盖决策。
+ *  自动重连关闭、用户/空闲主动断开、已在在线或排队集合、或未知设备，都不重连。 */
+internal fun shouldAutoReconnect(
+    autoConnect: Boolean,
+    mac: String,
+    reason: String,
+    online: Set<String>,
+    pending: Set<String>,
+    known: Boolean
+): Boolean {
+    if (!autoConnect) return false
+    if (reason in RECONNECT_IGNORED_REASONS) return false
+    if (mac in online || mac in pending) return false
+    return known
 }

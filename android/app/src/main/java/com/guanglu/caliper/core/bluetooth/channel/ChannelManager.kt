@@ -59,10 +59,11 @@ class ChannelManager(
     fun onlineCount(): Int = allocator.onlineCount()
     fun channelSlots(): Map<Int, String> = allocator.slots()
 
-    /** 连接前先申请槽位；第 8 台或超出机型上限直接拒绝并给出明确事件。 */
+    /** 连接前先申请槽位；第 8 台或超出机型上限直接拒绝并给出明确事件。已在线或已在排队/连接中的 MAC 直接返回，避免重复占槽。 */
     @Synchronized
     fun requestConnect(mac: String): Boolean {
         if (allocator.slotOf(mac) != null) return true
+        if (mac == connectingMac || pendingConnections.contains(mac)) return true
         if (allocator.acquire(mac) == null) {
             onEvent(
                 ChannelEvent.Rejected(
@@ -75,6 +76,13 @@ class ChannelManager(
         pendingConnections.addLast(mac)
         pumpConnections()
         return true
+    }
+
+    /** 已排队与正在连接（未拿到槽位）的设备 MAC 集合，用于自动重连去重。 */
+    @Synchronized
+    fun pendingMacs(): Set<String> = buildSet {
+        addAll(pendingConnections)
+        connectingMac?.let { add(it) }
     }
 
     @Synchronized

@@ -140,21 +140,19 @@ object Pages {
         listCard.addView(webCardTitle("附近设备"))
         val hint = webTiny("尚未扫描")
         listCard.addView(hint)
-        val found = mutableListOf<ScannedDevice>()
         val list = LinearLayout(context).apply { orientation = LinearLayout.VERTICAL }
         listCard.addView(list)
         col.addView(listCard)
         val slotLabels = mutableListOf<TextView>()
         col.addView(channelSlotsCard(context, slotLabels))
 
-        val session = ScanSession(c, actions, found, list, hint) { refreshConnect(c, state, slotLabels) }
+        val session = ScanSession(c, actions, list, hint) { refreshConnect(c, state, slotLabels) }
         stopScanOnDetach(page) { session.stop() }
         col.addView(webBtnRow(
             webButton("扫描设备", primary = true) { session.start() },
             webButton("全部断开", danger = true) {
                 val count = c.disconnectAll()
-                found.clear()
-                list.removeAllViews()
+                session.reset()
                 val message = if (count == 0) "当前没有已连接或在连接的通道" else "已断开 $count 个通道"
                 hint.text = message
                 actions.toast(message)
@@ -162,7 +160,7 @@ object Pages {
             }
         ))
         col.addView(webButton("连接全部 7 台") {
-            val targets = found.take(ChannelPalette.MAX_CHANNELS)
+            val targets = session.devices().take(ChannelPalette.MAX_CHANNELS)
             if (targets.isEmpty()) {
                 actions.toast("请先点『扫描设备』并等待列表出现卡尺")
                 return@webButton
