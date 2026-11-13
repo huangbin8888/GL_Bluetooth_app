@@ -4,9 +4,11 @@ import android.content.Context
 import android.graphics.Bitmap
 import android.os.Handler
 import android.os.Looper
+import android.view.Gravity
 import android.view.View
 import android.widget.ArrayAdapter
 import android.widget.EditText
+import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.Spinner
 import android.widget.Switch
@@ -22,7 +24,9 @@ import com.guanglu.caliper.ui.actionButton
 import com.guanglu.caliper.ui.card
 import com.guanglu.caliper.ui.chart.ChartCanvasView
 import com.guanglu.caliper.ui.column
+import com.guanglu.caliper.ui.compactButton
 import com.guanglu.caliper.ui.dp
+import com.guanglu.caliper.ui.evenParams
 import com.guanglu.caliper.ui.horizontal
 import com.guanglu.caliper.ui.input
 import com.guanglu.caliper.ui.label
@@ -113,25 +117,23 @@ object Pages {
     }
 
     private fun capture(context: Context, c: AppContainer, actions: UiActions): View {
-        val page = context.page()
-        val col = page.column()
-        header(context, "实时检测 · 记录", "两列表格：时间 + 数值；通道用行内色标，判定用左侧色条", col)
+        val root = LinearLayout(context).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(context.dp(12), context.dp(10), context.dp(12), context.dp(10))
+        }
+        header(
+            context,
+            "实时检测 · 记录",
+            "两列表格：时间 + 数值；通道用行内色标，判定用左侧色条",
+            root
+        )
 
-        val reading = context.label("— mm", 40f, true, 0xFF1668E3.toInt())
+        val reading = context.label("— mm", 36f, true, 0xFF1668E3.toInt())
         val count = context.label("已记录 0 条")
-        val adapter = MeasurementAdapter { item ->
-            actions.toast("CH${item.channelNo} · ${Units.formatMm(item.valueUm, 2)}mm · ${item.source} · ${item.note}")
-        }
-        val table = RecyclerView(context).apply {
-            layoutManager = LinearLayoutManager(context)
-            this.adapter = adapter
-            layoutParams = LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT, context.dp(360)
-            )
-        }
-        col.addView(reading)
-        col.addView(count)
-        col.addView(context.label("采集控制（对 CH1 生效）", 13f, true))
+        root.addView(reading)
+        root.addView(count)
+        root.addView(context.label("采集控制（对 CH1 生效）", 13f, true))
+
         val buttons = context.horizontal()
         listOf(
             CaliperCommand.MEAS.name to CaliperCommand.MEAS,
@@ -139,25 +141,59 @@ object Pages {
             "手动模式" to CaliperCommand.MOD_MANUAL,
             "连续模式" to CaliperCommand.MOD_CONTINUOUS
         ).forEach { (text, command) ->
-            buttons.addView(context.actionButton(text) { c.sendCommand(1, command) })
+            buttons.addView(context.compactButton(text) { c.sendCommand(1, command) }, evenParams())
         }
-        col.addView(buttons)
-        col.addView(context.label("时间 / 数值 (mm)", 12f, true))
-        col.addView(table)
-        col.addView(context.actionButton("设置") { actions.setPage("P7") })
-        col.addView(context.actionButton("导出") { actions.setPage("P6") })
+        root.addView(
+            buttons,
+            LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT)
+        )
+        root.addView(context.label("时间 / 数值 (mm)", 12f, true))
+
+        val empty = context.label("暂无记录 · 连接卡尺或导入 CSV 后显示", 12f, color = 0xFF6B778C.toInt())
+        empty.gravity = Gravity.CENTER
+        val rowAdapter = MeasurementAdapter { item ->
+            val detail = "CH${item.channelNo} · ${Units.formatMm(item.valueUm, 2)}mm · ${item.source} · ${item.note}"
+            actions.toast(detail)
+        }
+        val table = RecyclerView(context).apply {
+            layoutManager = LinearLayoutManager(context)
+            this.adapter = rowAdapter
+        }
+        val listArea = FrameLayout(context)
+        listArea.addView(
+            table,
+            FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT)
+        )
+        listArea.addView(
+            empty,
+            FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                FrameLayout.LayoutParams.WRAP_CONTENT,
+                Gravity.CENTER
+            )
+        )
+        root.addView(listArea, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f))
+
+        val footer = context.horizontal()
+        footer.addView(context.compactButton("设置") { actions.setPage("P7") }, evenParams())
+        footer.addView(context.compactButton("导出") { actions.setPage("P6") }, evenParams())
+        root.addView(
+            footer,
+            LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT)
+        )
 
         val job: Job = CoroutineScope(Dispatchers.Main).launch {
             c.measurements().collect { items ->
-                adapter.submit(items)
+                rowAdapter.submit(items)
                 count.text = "已记录 ${items.size} 条"
+                empty.visibility = if (items.isEmpty()) View.VISIBLE else View.GONE
                 items.firstOrNull()?.let {
                     reading.text = "${Units.formatMm(it.valueUm, 2)} mm"
                 }
             }
         }
-        page.tag = job
-        return page
+        root.tag = job
+        return root
     }
 
     private fun channels(context: Context, c: AppContainer, actions: UiActions): View {
@@ -206,9 +242,24 @@ object Pages {
         }
         col.addView(chart)
         val row = context.horizontal()
-        row.addView(context.actionButton("折线图") { chart.mode = ChartCanvasView.Mode.LINE; chart.invalidate() })
-        row.addView(context.actionButton("柱状图") { chart.mode = ChartCanvasView.Mode.BAR; chart.invalidate() })
-        row.addView(context.actionButton("导出 PNG") { actions.exportPng(chart.exportBitmap()) })
+        row.addView(
+            context.compactButton("折线图") {
+                chart.mode = ChartCanvasView.Mode.LINE
+                chart.invalidate()
+            },
+            evenParams()
+        )
+        row.addView(
+            context.compactButton("柱状图") {
+                chart.mode = ChartCanvasView.Mode.BAR
+                chart.invalidate()
+            },
+            evenParams()
+        )
+        row.addView(
+            context.compactButton("导出 PNG") { actions.exportPng(chart.exportBitmap()) },
+            evenParams()
+        )
         col.addView(row)
         val job: Job = CoroutineScope(Dispatchers.Main).launch {
             c.measurements().collect { items ->
@@ -278,17 +329,23 @@ object Pages {
         val nameInput = context.input("GL-BLE#xxxx（≤16 字符）", "GL-BLE#0187")
         card.addView(nameInput)
         val namRow = context.horizontal()
-        namRow.addView(context.actionButton("下发改名（NAM）") {
-            val channelNo = target.selectedItemPosition + 1
-            val ok = c.applyNam(channelNo, nameInput.text.toString())
-            actions.toast(
-                if (ok) "改名指令已写入 CH$channelNo，等待设备回包"
-                else "名称非法（须保留 GL-BLE# 前缀、总长 8–16）或该通道未连接"
-            )
-        })
-        namRow.addView(context.actionButton("读取当前名称") {
-            actions.toast("NAM 查询指令格式有歧义，M0 抓包确认前 V1 不实现实链路")
-        })
+        namRow.addView(
+            context.compactButton("下发改名（NAM）") {
+                val channelNo = target.selectedItemPosition + 1
+                val ok = c.applyNam(channelNo, nameInput.text.toString())
+                actions.toast(
+                    if (ok) "改名指令已写入 CH$channelNo，等待设备回包"
+                    else "名称非法（须保留 GL-BLE# 前缀、总长 8–16）或该通道未连接"
+                )
+            },
+            evenParams()
+        )
+        namRow.addView(
+            context.compactButton("读取当前名称") {
+                actions.toast("NAM 查询指令格式有歧义，M0 抓包确认前 V1 不实现实链路")
+            },
+            evenParams()
+        )
         card.addView(namRow)
 
         val autoEmit = context.input("自动发射时长（秒）· 仅登记", "30")
@@ -309,15 +366,21 @@ object Pages {
         val hidInput = EditText(context).apply { hint = "HID 键盘录入：接收或粘贴数值" }
         card.addView(hidInput)
         val hidRow = context.horizontal()
-        hidRow.addView(context.actionButton("注入示例 HID 输入") {
-            hidInput.setText("155.15\t155.08\t154.96\t")
-        })
-        hidRow.addView(context.actionButton("HID 录入落库") {
-            val channelNo = target.selectedItemPosition + 1
-            val mac = c.settings.lastMac ?: "HID"
-            val accepted = c.hid.submit(channelNo, mac, hidInput.text.toString())
-            actions.toast("HID 录入 $accepted 条，走同一条解析 → 去抖 → 落库链路")
-        })
+        hidRow.addView(
+            context.compactButton("注入示例 HID 输入") {
+                hidInput.setText("155.15\t155.08\t154.96\t")
+            },
+            evenParams()
+        )
+        hidRow.addView(
+            context.compactButton("HID 录入落库") {
+                val channelNo = target.selectedItemPosition + 1
+                val mac = c.settings.lastMac ?: "HID"
+                val accepted = c.hid.submit(channelNo, mac, hidInput.text.toString())
+                actions.toast("HID 录入 $accepted 条，走同一条解析 → 去抖 → 落库链路")
+            },
+            evenParams()
+        )
         card.addView(hidRow)
         card.addView(context.actionButton("保存登记（不下发到卡尺）") {
             val channelNo = target.selectedItemPosition + 1

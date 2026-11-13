@@ -8,11 +8,13 @@ import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
 import android.view.WindowManager
+import android.widget.Button
 import android.widget.FrameLayout
-import android.widget.HorizontalScrollView
 import android.widget.LinearLayout
 import android.widget.Toast
 import androidx.activity.ComponentActivity
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowInsetsCompat
 import com.guanglu.caliper.AppContainer
 import com.guanglu.caliper.CaliperApp
 import com.guanglu.caliper.ui.pages.Pages
@@ -34,6 +36,8 @@ class MainActivity : ComponentActivity(), UiActions {
     private var pendingChannel: Int? = null
     private var pendingBitmap: Bitmap? = null
     private var currentPage = "P2"
+    private val navButtons = mutableMapOf<String, Button>()
+    private val tabButtons = mutableMapOf<String, Button>()
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -42,18 +46,33 @@ class MainActivity : ComponentActivity(), UiActions {
         container = (application as CaliperApp).container
         container.uiEvent = { message -> runOnUiThread { toast(message) } }
 
-        val root = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        val root = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(10), dp(6), dp(10), dp(6))
+        }
+        ViewCompat.setOnApplyWindowInsetsListener(root) { view, insets ->
+            val bars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
+            view.setPadding(dp(10), bars.top + dp(6), dp(10), bars.bottom + dp(6))
+            insets
+        }
         root.addView(
-            label("蓝牙卡尺测量数据助手 · 原生工程骨架 v0.1.0-m0", 14f, true),
-            LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT)
+            label("蓝牙卡尺测量数据助手 · v0.1.1", 12f, true),
+            LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            ).apply { bottomMargin = dp(4) }
         )
 
         val nav = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
-        val navScroll = HorizontalScrollView(this).apply { addView(nav) }
         listOf("P1", "P2", "P3", "P4", "P5", "P6", "P7").forEach { id ->
-            nav.addView(actionButton(id) { setPage(id) })
+            val button = compactButton(id) { setPage(id) }
+            navButtons[id] = button
+            nav.addView(button, evenParams())
         }
-        root.addView(navScroll)
+        root.addView(
+            nav,
+            LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT)
+        )
 
         content = FrameLayout(this)
         root.addView(
@@ -63,12 +82,14 @@ class MainActivity : ComponentActivity(), UiActions {
 
         val tabs = horizontal()
         listOf("连接" to "P1", "检测" to "P2", "通道" to "P3", "分析" to "P5").forEach { (name, id) ->
-            tabs.addView(
-                actionButton(name) { setPage(id) },
-                LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
-            )
+            val button = compactButton(name) { setPage(id) }
+            tabButtons[id] = button
+            tabs.addView(button, evenParams())
         }
-        root.addView(tabs)
+        root.addView(
+            tabs,
+            LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT)
+        )
         setContentView(root)
 
         setPage(currentPage)
@@ -86,6 +107,8 @@ class MainActivity : ComponentActivity(), UiActions {
 
     override fun setPage(pageId: String) {
         currentPage = pageId
+        navButtons.forEach { (id, button) -> button.alpha = if (id == pageId) 1f else 0.55f }
+        tabButtons.forEach { (id, button) -> button.alpha = if (id == pageId) 1f else 0.55f }
         (content.getChildAt(0)?.tag as? Job)?.cancel()
         content.removeAllViews()
         content.addView(Pages.build(this, pageId, container, this))

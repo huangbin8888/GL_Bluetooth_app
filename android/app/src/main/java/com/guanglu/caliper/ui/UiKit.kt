@@ -36,6 +36,25 @@ fun Context.actionButton(text: String, onClick: () -> Unit): Button =
         setOnClickListener { onClick() }
     }
 
+/** 横向等分栏使用的紧凑按钮。 */
+fun Context.compactButton(text: String, onClick: () -> Unit): Button =
+    Button(this).apply {
+        this.text = text
+        isAllCaps = false
+        textSize = 12f
+        minWidth = 0
+        minimumWidth = 0
+        minHeight = 0
+        minimumHeight = 0
+        setPadding(dp(4), dp(6), dp(4), dp(6))
+        setSingleLine(true)
+        setOnClickListener { onClick() }
+    }
+
+/** 横向等分栏的子 View 布局参数。 */
+fun evenParams(): LinearLayout.LayoutParams =
+    LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+
 fun Context.input(hint: String, initial: String = ""): EditText = EditText(this).apply {
     this.hint = hint
     setText(initial)
