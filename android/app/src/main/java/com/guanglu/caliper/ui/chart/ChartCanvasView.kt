@@ -10,16 +10,17 @@ import com.guanglu.caliper.core.model.ChannelPalette
 import com.guanglu.caliper.core.model.Units
 
 /**
- * M0 前的可编译图表实现：原生 Canvas 自绘折线 / 柱状 + 公差参考线 + 按通道色着色。
- * 基线 5.1 的「首选 Vico」决策不推翻；M0 通过且确认 Vico 的 PNG 导出稳定后，
- * 在此接口下替换适配器即可。Vico API 未经本机编译验证，故 V1 骨架不引入其调用。
+ * 原生 Canvas 自绘折线图、柱状图与 PNG 导出。
+ *
+ * @author AI-Generated
  */
 class ChartCanvasView(context: Context) : View(context) {
 
     enum class Mode { LINE, BAR }
 
     var mode: Mode = Mode.LINE
-    var points: List<Pair<Int, Long>> = emptyList()   // channelNo -> valueUm
+    /** 通道号与整数微米数值对。 */
+    var points: List<Pair<Int, Long>> = emptyList()
     var lowerUm: Long? = null
     var upperUm: Long? = null
 
@@ -90,7 +91,7 @@ class ChartCanvasView(context: Context) : View(context) {
         }
     }
 
-    /** P6 图表 PNG 导出：View 自身绘制到 Bitmap，不依赖第三方库的截图 API。 */
+    /** 把 View 绘制到 Bitmap。 */
     fun exportBitmap(): Bitmap {
         val bitmap = Bitmap.createBitmap(
             width.coerceAtLeast(1), height.coerceAtLeast(1), Bitmap.Config.ARGB_8888

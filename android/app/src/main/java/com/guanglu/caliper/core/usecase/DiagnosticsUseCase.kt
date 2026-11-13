@@ -5,7 +5,11 @@ import android.net.Uri
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
-/** A7：原始帧 / 指令 / 回包 / 错误码的环形日志，M0 实机排障用，可导出为 CSV。 */
+/**
+ * 原始帧与指令的环形诊断日志。
+ *
+ * @author AI-Generated
+ */
 class DiagnosticsUseCase(private val context: Context) {
 
     private val lines = ArrayDeque<String>()

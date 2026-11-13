@@ -12,13 +12,15 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.util.concurrent.atomic.AtomicInteger
 
 /**
- * 收帧 → 换算 → 去重 → 落库的单一入口。数据库写入只允许发生在 usecase（分层约束 4）。
- * 收到即落库：以毫秒级微批合并 7 路并发写入，Room @Insert(List) 本身是单事务。
+ * 收帧、换算、去重与批量落库。
+ *
+ * @author AI-Generated
  */
 class CaptureMeasurementsUseCase(
     private val dao: MeasurementDao,
@@ -37,6 +39,15 @@ class CaptureMeasurementsUseCase(
     private val buffer = mutableListOf<Measurement>()
     private val lock = Any()
     private val seq = AtomicInteger(0)
+    private val mFlushSignal = Channel<Unit>(Channel.CONFLATED)
+
+    init {
+        scope.launch {
+            for (signal in mFlushSignal) {
+                flush()
+            }
+        }
+    }
 
     fun onFrame(
         channelNo: Int,
@@ -65,10 +76,10 @@ class CaptureMeasurementsUseCase(
         )
         val entity = toEntity(draft, settings.activeBatchId, seq.incrementAndGet())
         synchronized(lock) { buffer.add(entity) }
-        scope.launch { flush() }
+        mFlushSignal.trySend(Unit)
     }
 
-    /** HID 键盘录入也走同一条链路，不直接写库（基线 12.4）。 */
+    /** HID 键盘录入帧走同一条落库链路。 */
     fun onHidFrame(channelNo: Int, mac: String, frame: CaliperFrame.Measurement) =
         onFrame(channelNo, mac, frame, Source.HID)
 
@@ -85,7 +96,10 @@ class CaptureMeasurementsUseCase(
 
     fun resetDebounce() = debouncer.clearAll()
 
-    fun close() = scope.cancel()
+    fun close() {
+        mFlushSignal.close()
+        scope.cancel()
+    }
 
     companion object {
         fun toEntity(draft: MeasurementDraft, batchId: Long, seq: Int): Measurement = Measurement(

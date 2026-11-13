@@ -10,7 +10,11 @@ import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
 
-/** 纯代码构建 View：不引入 Compose / AppCompat / XML 布局，降低 M0 前的编译面。 */
+/**
+ * 纯代码构建 View 的扩展函数集合。
+ *
+ * @author AI-Generated
+ */
 fun Context.dp(value: Int): Int = (value * resources.displayMetrics.density + 0.5f).toInt()
 
 fun Context.label(

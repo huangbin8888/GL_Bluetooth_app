@@ -11,9 +11,14 @@ import com.guanglu.caliper.core.database.entity.Measurement
 import com.guanglu.caliper.core.database.entity.Template
 import kotlinx.coroutines.flow.Flow
 
+/**
+ * Room DAO 接口集合。
+ *
+ * @author AI-Generated
+ */
 @Dao
 interface MeasurementDao {
-    /** 7 路并发写库用单事务批量提交（基线 10.3）；成功返回自增 id 后才更新 UI 计数。 */
+    /** 批量写入测量记录并返回自增 id。 */
     @Insert
     suspend fun insertAll(items: List<Measurement>): List<Long>
 

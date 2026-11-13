@@ -18,3 +18,6 @@ android/keystore.properties
 *.aab
 *.keystore
 *.jks
+
+# dist/ 下交付给用户的正式 APK 属版本产物，按交付同步规则入库
+!dist/gl-caliper-debug.apk

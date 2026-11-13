@@ -23,7 +23,11 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 
-/** 手工依赖组装：ui/ 只通过这里拿 usecase，不直接持有 BluetoothCentral（分层约束 1）。 */
+/**
+ * 手工依赖组装，向 ui/ 提供 usecase 与通道门面。
+ *
+ * @author AI-Generated
+ */
 class AppContainer(context: Context) {
 
     val settings = SettingsRepository(context)
@@ -54,7 +58,7 @@ class AppContainer(context: Context) {
         onDiagnostic = { diagnostics.log(it) }
     )
 
-    // ---- UI 门面：ui/ 只依赖 AppContainer，不直接触碰蓝牙层（分层约束 1）----
+    // ---- UI 门面 ----
     fun startScan(onDevice: (ScannedDevice) -> Unit) = channelManager.startScan(onDevice)
     fun stopScan() = channelManager.stopScan()
     fun connect(mac: String): Boolean = channelManager.requestConnect(mac)
@@ -124,7 +128,9 @@ class AppContainer(context: Context) {
             is ChannelEvent.Disconnected -> uiEvent("CH${event.channelNo} 断开：${event.reason}")
             is ChannelEvent.Rejected -> uiEvent(event.reason)
             is ChannelEvent.LimitReached -> uiEvent("已达该机型并发上限 ${event.actual}，剩余设备未连接；已连通道继续采集")
-            is ChannelEvent.Ack -> uiEvent("CH${event.channelNo} ${event.command} ${if (event.ok) "OK" else "ERR（重试中）"}")
+            is ChannelEvent.Ack -> uiEvent(
+                "CH${event.channelNo} ${event.command} ${if (event.ok) "OK" else "ERR（重试中）"}"
+            )
             is ChannelEvent.NamResult -> uiEvent(
                 if (event.ok) "CH${event.channelNo} 改名成功，可能需重连生效"
                 else "CH${event.channelNo} 改名失败（设备回 ERR）"

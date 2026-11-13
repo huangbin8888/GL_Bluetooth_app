@@ -12,8 +12,9 @@ interface FrameSink {
 }
 
 /**
- * 单通道状态机：独立 FrameBuffer，按通道实例化，避免 7 路字节流串帧（基线 10.5）。
- * 纯 Kotlin，不持有 Android View / Handler。
+ * 单通道状态机，按通道持有独立 FrameBuffer。
+ *
+ * @author AI-Generated
  */
 class ChannelSlot(
     private val driver: CaliperDevice,
@@ -35,7 +36,7 @@ class ChannelSlot(
         when (val frame = driver.accept(text)) {
             is CaliperFrame.Measurement -> {
                 sink.onMeasurement(frame)
-                // A3：握手回包只在完整帧解析成功后回，半帧不回。
+                // 完整帧解析成功后回握手回包。
                 driver.ackBytesFor(frame)?.let { sink.onWrite(it) }
             }
             is CaliperFrame.Ack -> sink.onAck(frame)

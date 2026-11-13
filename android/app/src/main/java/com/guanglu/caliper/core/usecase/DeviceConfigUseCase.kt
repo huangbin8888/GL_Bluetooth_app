@@ -9,8 +9,9 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 /**
- * P7 蓝牙配置的「登记」写入口：自动发射时长 / 休眠 / 结束符按 MAC 存到本机 device 表。
- * 这些是设备端参数且无厂商指令集，App 不下发；界面不得提示「已配置成功」（基线 12.5）。
+ * 按 MAC 登记设备端参数。
+ *
+ * @author AI-Generated
  */
 class DeviceConfigUseCase(
     private val dao: DeviceDao,

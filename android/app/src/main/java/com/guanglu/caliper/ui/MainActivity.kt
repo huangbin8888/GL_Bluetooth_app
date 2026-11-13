@@ -22,6 +22,11 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 
+/**
+ * 主界面：7 屏切换、权限申请与 SAF 调用。
+ *
+ * @author AI-Generated
+ */
 class MainActivity : ComponentActivity(), UiActions {
 
     private lateinit var container: AppContainer
@@ -32,7 +37,7 @@ class MainActivity : ComponentActivity(), UiActions {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        // A1：采集页屏幕常亮，息屏可能触发省电断连，卡尺无历史数据可补。
+        // 采集页保持屏幕常亮。
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         container = (application as CaliperApp).container
         container.uiEvent = { message -> runOnUiThread { toast(message) } }

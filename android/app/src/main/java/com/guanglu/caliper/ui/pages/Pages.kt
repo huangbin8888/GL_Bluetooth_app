@@ -42,8 +42,15 @@ interface UiActions {
     fun openSystemSettings()
 }
 
-/** 7 个页面，全部用代码构建 View；P2 为实时检测 + 记录合并页，P7 含蓝牙配置登记区。 */
+/**
+ * 7 个页面的 View 构建入口。
+ *
+ * @author AI-Generated
+ */
 object Pages {
+    private const val TEMPLATE_COLUMNS =
+        "16 列：DATE / TIME / SEQ / BATCH / ITEM / NOMINAL / LOWER_TOL / UPPER_TOL / " +
+            "VALUE_MM / RAW_VALUE / RAW_UNIT / VERDICT / SOURCE / DEVICE_MAC / CHANNEL / NOTE"
 
     fun build(context: Context, pageId: String, c: AppContainer, actions: UiActions): View =
         when (pageId) {
@@ -80,7 +87,8 @@ object Pages {
                 handler.post {
                     if (found.any { it.mac == device.mac }) return@post
                     found.add(device)
-                    list.addView(context.actionButton("${device.name} · ${device.mac.takeLast(4)} · ${device.rssi}dBm") {
+                    val title = "${device.name} · ${device.mac.takeLast(4)} · ${device.rssi}dBm"
+                    list.addView(context.actionButton(title) {
                         if (!c.connect(device.mac)) {
                             actions.toast("通道已满，未连接 ${device.mac.takeLast(4)}")
                         }
@@ -126,8 +134,8 @@ object Pages {
         col.addView(context.label("采集控制（对 CH1 生效）", 13f, true))
         val buttons = context.horizontal()
         listOf(
-            "MEAS" to CaliperCommand.MEAS,
-            "CLR" to CaliperCommand.CLR,
+            CaliperCommand.MEAS.name to CaliperCommand.MEAS,
+            CaliperCommand.CLR.name to CaliperCommand.CLR,
             "手动模式" to CaliperCommand.MOD_MANUAL,
             "连续模式" to CaliperCommand.MOD_CONTINUOUS
         ).forEach { (text, command) ->
@@ -179,7 +187,7 @@ object Pages {
         header(context, "表格模板", "V1：内置默认模板 + CSV 表头模板；xlsx 完整模板在 V2", col)
         val card = context.card()
         card.addView(context.label("内置默认模板", 15f, true))
-        card.addView(context.label("16 列：DATE / TIME / SEQ / BATCH / ITEM / NOMINAL / LOWER_TOL / UPPER_TOL / VALUE_MM / RAW_VALUE / RAW_UNIT / VERDICT / SOURCE / DEVICE_MAC / CHANNEL / NOTE", 12f))
+        card.addView(context.label(TEMPLATE_COLUMNS, 12f))
         card.addView(context.label("UTF-8 BOM · 支持中文别名 · 未识别列整列跳过 · 历史 CH8–CH10 归入历史通道", 11f))
         col.addView(card)
         col.addView(context.actionButton("导入 CSV（模板 / 数据）") { actions.importCsv() })

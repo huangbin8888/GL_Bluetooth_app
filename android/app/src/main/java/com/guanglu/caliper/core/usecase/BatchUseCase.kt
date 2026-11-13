@@ -7,7 +7,11 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 
-/** 默认批次的创建也属于数据库写入，只允许发生在 usecase（分层约束 4）。 */
+/**
+ * 默认批次的创建与查询。
+ *
+ * @author AI-Generated
+ */
 class BatchUseCase(
     private val dao: BatchDao,
     private val scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)

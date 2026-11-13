@@ -3,9 +3,9 @@ package com.guanglu.caliper.core.usecase
 import com.guanglu.caliper.core.model.ChannelPalette
 
 /**
- * V1 CSV 编解码（基线 4.2 / 11.2）：稳定大写列 key + 中文别名、UTF-8 BOM、
- * 未识别列整列跳过、单行解析失败不中断整表。纯 Kotlin，零 Android 依赖，可 JVM 测试。
- * V1 只支持「一行表头 + N 行数据」的平表；合并单元格 / 公式 / 样式属 V2。
+ * CSV 表头解析与数据行编解码。
+ *
+ * @author AI-Generated
  */
 object CsvCodec {
 
@@ -93,7 +93,7 @@ object CsvCodec {
         return ParseResult(headers, rows, skipped, parseErrors, bomRemoved)
     }
 
-    /** 返回 (通道号, 是否历史通道)。CH8–CH10 保留原值并标 legacy，不丢历史数据。 */
+    /** 返回通道号与历史通道标记，CH8–CH10 保留原值。 */
     fun channelOf(raw: String): Pair<Int, Boolean> {
         val value = raw.trim().uppercase()
         val number = value.removePrefix("CH").toIntOrNull() ?: return 0 to true

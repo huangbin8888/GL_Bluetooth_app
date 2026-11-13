@@ -2,7 +2,11 @@ package com.guanglu.caliper.core.datastore
 
 import android.content.Context
 
-/** 设置项（SharedPreferences）：默认单位 / 小数位 / 公差 / 去抖阈值 / 结束符 / 上次 MAC / 通道筛选。 */
+/**
+ * SharedPreferences 设置项读写。
+ *
+ * @author AI-Generated
+ */
 class SettingsRepository(context: Context) {
 
     private val sp = context.applicationContext
@@ -32,7 +36,7 @@ class SettingsRepository(context: Context) {
         get() = sp.getLong("debounce_window_ms", 300L)
         set(value) = sp.edit().putLong("debounce_window_ms", value).apply()
 
-    /** 仅登记，不写入卡尺；只用于 HID 键盘录入切分（基线 12.5）。 */
+    /** 结束符登记值，用于 HID 键盘录入切分。 */
     var terminator: String
         get() = sp.getString("terminator", "CR") ?: "CR"
         set(value) = sp.edit().putString("terminator", if (value == "TAB") "TAB" else "CR").apply()

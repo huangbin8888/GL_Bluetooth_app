@@ -28,7 +28,11 @@ data class ImportReport(
     val fatal: String? = null
 )
 
-/** CSV / PNG 导入导出，全部走 ContentResolver + SAF，不硬编码绝对路径（分层约束 7）。 */
+/**
+ * 通过 SAF 完成 CSV 与 PNG 导入导出。
+ *
+ * @author AI-Generated
+ */
 class ImportExportUseCases(
     private val context: Context,
     private val dao: MeasurementDao,
@@ -115,7 +119,7 @@ class ImportExportUseCases(
 
     private fun toRow(item: Measurement): Map<String, String> {
         val (date, time) = formatDateTime(item.capturedAt)
-        // legacy_channel=true 时 channelNo 可能是 CH8-CH10 的历史值，按原值写回，不丢数据。
+        // 历史通道按 CH8–CH10 原值写回。
         val channel = "CH${item.channelNo}"
         return mapOf(
             "DATE" to date,

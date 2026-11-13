@@ -3,8 +3,9 @@ package com.guanglu.caliper.core.usecase
 import kotlin.math.abs
 
 /**
- * A4 量化去重：同一通道内「值变化 ≤ 0.01mm(10um) 且间隔 ≤ 300ms」才丢弃。
- * 去重键含 channel_no，7 台同一读数必须各记一条（基线 10.3 跨通道不去重）。
+ * 同通道重复读数去抖。
+ *
+ * @author AI-Generated
  */
 class Debouncer(
     private val sameValueDeltaUm: Long = 10L,

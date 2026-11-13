@@ -25,6 +25,11 @@ import com.guanglu.caliper.core.database.entity.Template
     version = 2,
     exportSchema = false
 )
+/**
+ * Room 数据库定义与版本迁移。
+ *
+ * @author AI-Generated
+ */
 abstract class AppDatabase : RoomDatabase() {
     abstract fun measurementDao(): MeasurementDao
     abstract fun batchDao(): BatchDao

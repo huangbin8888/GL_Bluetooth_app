@@ -23,8 +23,9 @@ sealed class ChannelEvent {
 }
 
 /**
- * 7 路并发总控：槽位分配、串行连接、串行 GATT 命令、单路断连隔离、机型上限降级、
- * NAM 只对选中通道生效。数据库写入不在这里发生（分层约束 4）。
+ * 7 路并发总控：槽位分配、串行连接、串行命令与断连隔离。
+ *
+ * @author AI-Generated
  */
 class ChannelManager(
     private val transport: BleTransport,
@@ -90,7 +91,7 @@ class ChannelManager(
         return true
     }
 
-    /** V1 唯一可真实下发的配置；绑定 channel_no，不向 7 路广播（基线 12.4）。 */
+    /** 对指定通道下发 NAM 名称。 */
     fun applyNam(channelNo: Int, name: String): Boolean {
         val mac = allocator.macOf(channelNo) ?: return false
         if (!GuangluCaliperHandler.validateNam(name)) return false
@@ -111,7 +112,21 @@ class ChannelManager(
 
     fun setDeviceLimit(limit: Int) = allocator.setDeviceLimit(limit)
 
-    fun close() = retryTimer.cancel()
+    /** 释放所有通道、待发命令与重试任务。 */
+    fun close() {
+        retryTimer.cancel()
+        pendingConnections.clear()
+        connectingMac = null
+        val macs = slots.keys.toList()
+        slots.clear()
+        macs.forEach { mac ->
+            transport.disconnect(mac)
+            commandQueue.cancelFor(mac)
+            allocator.release(mac)
+        }
+        lastCommand.clear()
+        retryCount.clear()
+    }
 
     // ---- BleConnectionCallback ----
 
@@ -144,8 +159,7 @@ class ChannelManager(
         commandQueue.cancelFor(mac)
         connectingMac = null
         onDiagnostic("CONNECT_FAIL $mac $reason")
-        // AOSP 默认 7 路，部分低端机只稳 3-4 路。仅当错误指向资源耗尽时下调机型上限，
-        // 避免把「设备关机」误报成机型限制（基线 11.3 强制降级要求）。
+        // 错误指向资源耗尽时下调机型上限。
         val looksLikeLimit = listOf("133", "RESOURCE", "LIMIT", "MAX", "TOO_MANY")
             .any { reason.uppercase().contains(it) }
         val online = allocator.onlineCount()
@@ -192,7 +206,7 @@ class ChannelManager(
         }
     }
 
-    /** A12：采集与模式指令的 ERR 回包按指数退避重试 2 次（500ms、1000ms）。 */
+    /** 采集与模式指令的 ERR 回包按指数退避重试 2 次。 */
     private fun retry(mac: String, command: String) {
         val attempt = (retryCount[mac] ?: 0) + 1
         if (attempt > 2) {

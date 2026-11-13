@@ -3,15 +3,16 @@ package com.guanglu.caliper.core.bluetooth.channel
 import com.guanglu.caliper.core.model.ChannelPalette
 
 /**
- * 7 个会话槽位的分配器：第 8 台拒绝、单路释放不影响其他路、支持机型上限降级。
- * 与 BLE 传输解耦，纯 Kotlin 可 JVM 测试（基线 10.3 / 11.3）。
+ * 7 个会话槽位的分配与释放。
+ *
+ * @author AI-Generated
  */
 class ChannelAllocator(private val maxChannels: Int = ChannelPalette.MAX_CHANNELS) {
 
     private val byMac = LinkedHashMap<String, Int>()
     private val bySlot = LinkedHashMap<Int, String>()
 
-    /** 机型实测达不到 7 路时下调；上限永远不超过 maxChannels。 */
+    /** 下调机型并发上限，上限不超过 7。 */
     @Volatile
     var deviceLimit: Int = maxChannels
         private set
@@ -23,7 +24,7 @@ class ChannelAllocator(private val maxChannels: Int = ChannelPalette.MAX_CHANNEL
 
     private fun effectiveLimit(): Int = minOf(maxChannels, deviceLimit)
 
-    /** 返回槽位号 1..7；已满或已达机型上限返回 null（调用方必须给出明确提示）。 */
+    /** 返回槽位号 1..7；已满或已达上限返回 null。 */
     @Synchronized
     fun acquire(mac: String): Int? {
         byMac[mac]?.let { return it }

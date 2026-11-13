@@ -5,8 +5,9 @@ import com.guanglu.caliper.core.model.Units
 import java.util.UUID
 
 /**
- * 广陆协议唯一实现：DAT0/DAT1/MEAS/CLR/MOD/NAM/DAT0:OK 字符串只在本文件出现。
- * 依据《广陆蓝牙设备数字化接口_通用.doc》；NAM 是 V1 唯一可真实下发的配置项。
+ * 广陆协议帧解析与命令构建。
+ *
+ * @author AI-Generated
  */
 object GuangluCaliperHandler : CaliperDevice {
 
@@ -21,7 +22,7 @@ object GuangluCaliperHandler : CaliperDevice {
     private val ACK = Regex("^(MEAS|CLR|MOD|NAM):(OK|ERR)$")
     private val NAME_SUFFIX = Regex("^[A-Za-z0-9_-]+$")
 
-    /** 帧头切分规则也由驱动提供，FrameBuffer 不持有协议字符串（分层约束 3）。 */
+    /** 按帧头切分协议帧 */
     val FRAME_START_PATTERN = Regex(
         "DAT0:|DAT1:|MEAS:OK|MEAS:ERR|CLR:OK|CLR:ERR|MOD:OK|MOD:ERR|NAM:OK|NAM:ERR"
     )
@@ -58,7 +59,7 @@ object GuangluCaliperHandler : CaliperDevice {
         return CaliperFrame.Unknown(frame)
     }
 
-    /** DAT0 握手只在完整帧解析成功后回；DAT1 不回（接口文档强制）。 */
+    /** 完整帧解析成功后返回 DAT0 握手回包字节。 */
     override fun ackBytesFor(frame: CaliperFrame): ByteArray? {
         if (frame is CaliperFrame.Measurement && frame.source == "DAT0") {
             return "DAT0:OK".toByteArray(Charsets.US_ASCII)
@@ -73,7 +74,7 @@ object GuangluCaliperHandler : CaliperDevice {
         CaliperCommand.MOD_CONTINUOUS -> "MOD:1"
     }.toByteArray(Charsets.US_ASCII)
 
-    /** 名称总长 8..16、必须保留 GL-BLE# 前缀、后缀仅 ASCII 字母数字 _ -（基线 17.3 / Assumptions）。 */
+    /** 校验名称总长 8..16 与后缀字符集。 */
     fun validateNam(name: String): Boolean {
         if (name.length !in (NAME_PREFIX.length + 1)..MAX_NAME_LENGTH) return false
         if (!name.startsWith(NAME_PREFIX)) return false
@@ -88,8 +89,7 @@ object GuangluCaliperHandler : CaliperDevice {
     }
 
     /**
-     * HID 键盘录入的数值转成 DAT0 帧后复用同一个 accept()，保证协议字符串仍只在本文件。
-     * 支持 "155.15" / "-1.2485 in"；转换完走同一条解析 → 换算 → 去抖 → 落库链路。
+     * HID 键盘录入数值转成 DAT0 帧。
      */
     fun fromHidToken(token: String): CaliperFrame {
         val text = token.trim()

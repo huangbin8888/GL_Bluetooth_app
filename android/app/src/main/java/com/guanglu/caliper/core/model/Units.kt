@@ -4,8 +4,9 @@ import java.math.BigDecimal
 import java.math.RoundingMode
 
 /**
- * 单位换算唯一入口。协议帧同时支持 m=mm 与 i=inch，落库前统一为整数微米，
- * 避免公差边界的浮点误判（V1开发基线 A2 / 4.2）。
+ * mm / inch 到整数微米的换算与判定。
+ *
+ * @author AI-Generated
  */
 object Units {
     private val MM_TO_UM = BigDecimal("1000")

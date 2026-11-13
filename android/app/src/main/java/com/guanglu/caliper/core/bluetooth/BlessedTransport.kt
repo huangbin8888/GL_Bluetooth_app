@@ -10,17 +10,16 @@ import com.welie.blessed.BluetoothCentralManager
 import com.welie.blessed.BluetoothCentralManagerCallback
 import com.welie.blessed.BluetoothPeripheral
 import com.welie.blessed.BluetoothPeripheralCallback
+import com.welie.blessed.ConnectionState
 import com.welie.blessed.GattStatus
 import com.welie.blessed.HciStatus
 import com.welie.blessed.WriteType
 import java.util.concurrent.ConcurrentHashMap
 
 /**
- * blessed-android 2.5.3 适配器。API 签名于 2026-11-12 对照官方 README 核实：
- * BluetoothCentralManager(Context, BluetoothCentralManagerCallback, Handler)、
- * scanForPeripherals / stopScan / connectPeripheral / cancelConnection / getPeripheral、
- * getCharacteristic(UUID, UUID) / setNotify / writeCharacteristic / onCharacteristicUpdate。
- * 回调统一跑在主线程 Handler；跨 7 路的写命令由 CommandQueue 另行串行化。
+ * blessed-android 传输适配器：设备扫描、连接、通知订阅、命令写入与连接状态查询。
+ *
+ * @author AI-Generated
  */
 class BlessedTransport(
     context: Context,
@@ -65,11 +64,28 @@ class BlessedTransport(
                 GuangluCaliperHandler.SERVICE_UUID,
                 GuangluCaliperHandler.CHARACTERISTIC_UUID
             )
-            if (characteristic != null) {
-                // setNotify 会由库完成 CCCD 写入；成功与否在 onNotificationStateUpdate 观察。
-                peripheral.setNotify(characteristic, true)
+            if (characteristic == null) {
+                callbacks[peripheral.address]
+                    ?.onConnectionFailed(peripheral.address, "CHARACTERISTIC_MISSING")
+                return
+            }
+            if (!peripheral.setNotify(characteristic, true)) {
+                callbacks[peripheral.address]
+                    ?.onConnectionFailed(peripheral.address, "NOTIFY_SUBSCRIBE_REJECTED")
+                return
             }
             callbacks[peripheral.address]?.onReady(peripheral.address)
+        }
+
+        override fun onNotificationStateUpdate(
+            peripheral: BluetoothPeripheral,
+            characteristic: BluetoothGattCharacteristic,
+            status: GattStatus
+        ) {
+            if (status != GattStatus.SUCCESS) {
+                callbacks[peripheral.address]
+                    ?.onConnectionFailed(peripheral.address, "NOTIFY_STATE_$status")
+            }
         }
 
         override fun onCharacteristicUpdate(
@@ -106,7 +122,7 @@ class BlessedTransport(
     }
 
     override fun connect(mac: String, callback: BleConnectionCallback) {
-        // 基线 10.3：连接前先停扫描；connectPeripheral 同时只允许一个 outstanding。
+        // 连接前停止扫描
         central.stopScan()
         callbacks[mac] = callback
         val peripheral = central.getPeripheral(mac)
@@ -120,6 +136,7 @@ class BlessedTransport(
     }
 
     override fun write(mac: String, bytes: ByteArray): Boolean {
+        if (!isConnected(mac)) return false
         val peripheral = peripherals[mac] ?: return false
         val characteristic = peripheral.getCharacteristic(
             GuangluCaliperHandler.SERVICE_UUID,
@@ -128,5 +145,6 @@ class BlessedTransport(
         return peripheral.writeCharacteristic(characteristic, bytes, WriteType.WITHOUT_RESPONSE)
     }
 
-    override fun isConnected(mac: String): Boolean = peripherals.containsKey(mac)
+    override fun isConnected(mac: String): Boolean =
+        peripherals[mac]?.state == ConnectionState.CONNECTED
 }

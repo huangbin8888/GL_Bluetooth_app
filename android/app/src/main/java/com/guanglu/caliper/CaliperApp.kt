@@ -2,6 +2,11 @@ package com.guanglu.caliper
 
 import android.app.Application
 
+/**
+ * 应用入口，持有 AppContainer。
+ *
+ * @author AI-Generated
+ */
 class CaliperApp : Application() {
     lateinit var container: AppContainer
         private set

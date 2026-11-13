@@ -81,8 +81,8 @@ class ConcurrencyTest {
     @Test fun debounce_honours_value_delta_and_time_window() {
         val debouncer = Debouncer()
         assertTrue(debouncer.shouldAccept(1, 155150L, 1000L))
-        assertFalse(debouncer.shouldAccept(1, 155155L, 1200L))  // ≤10um 且 ≤300ms
-        assertTrue(debouncer.shouldAccept(1, 155155L, 1400L))   // 超窗
-        assertTrue(debouncer.shouldAccept(1, 155300L, 1450L))   // 值变化 >10um
+        assertFalse(debouncer.shouldAccept(1, 155155L, 1200L))
+        assertTrue(debouncer.shouldAccept(1, 155155L, 1400L))
+        assertTrue(debouncer.shouldAccept(1, 155300L, 1450L))
     }
 }

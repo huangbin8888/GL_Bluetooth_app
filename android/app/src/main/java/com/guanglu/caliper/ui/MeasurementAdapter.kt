@@ -17,8 +17,9 @@ import java.util.Date
 import java.util.Locale
 
 /**
- * P2 合并页的两列表格：时间 + 数值。通道用行内 CH 色标、判定用左侧色条、
- * 备注与来源收进点行弹窗，均不占列（基线 10.4）。
+ * 实时检测与记录合并页的两列列表适配器。
+ *
+ * @author AI-Generated
  */
 class MeasurementAdapter(
     private val onRowClick: (Measurement) -> Unit

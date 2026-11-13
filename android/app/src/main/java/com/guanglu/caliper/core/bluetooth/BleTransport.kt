@@ -1,6 +1,10 @@
 package com.guanglu.caliper.core.bluetooth
 
-/** 与具体 BLE 库解耦的传输接口；BlessedTransport 是唯一实现。 */
+/**
+ * BLE 扫描、连接、写入与连接状态查询接口。
+ *
+ * @author AI-Generated
+ */
 data class ScannedDevice(val mac: String, val name: String, val rssi: Int)
 
 interface BleConnectionCallback {

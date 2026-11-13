@@ -13,6 +13,11 @@ import androidx.room.PrimaryKey
     tableName = "measurement",
     indices = [Index("batch_id"), Index("channel_no"), Index("captured_at")]
 )
+/**
+ * Room 实体定义，数值以整数微米存储。
+ *
+ * @author AI-Generated
+ */
 data class Measurement(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
     @ColumnInfo(name = "batch_id") val batchId: Long,
@@ -60,7 +65,7 @@ data class Device(
     @ColumnInfo(name = "last_connected_at") val lastConnectedAt: Long = 0,
     @ColumnInfo(name = "is_last_used") val isLastUsed: Boolean = false,
     @ColumnInfo(name = "channel_no") val channelNo: Int? = null,
-    // ↓ 12.4 / 17.4：三项设备端参数按 MAC 只登记，App 不下发、不冒充设备配置。
+    // 自动发射时长 / 休眠 / 结束符按 MAC 登记
     @ColumnInfo(name = "custom_name") val customName: String? = null,
     @ColumnInfo(name = "auto_emit_seconds") val autoEmitSeconds: Int? = null,
     @ColumnInfo(name = "sleep_enabled") val sleepEnabled: Boolean = false,
