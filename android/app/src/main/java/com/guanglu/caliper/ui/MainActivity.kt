@@ -20,6 +20,7 @@ import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import com.guanglu.caliper.AppContainer
 import com.guanglu.caliper.CaliperApp
+import com.guanglu.caliper.core.model.safResultMessage
 import com.guanglu.caliper.ui.pages.Pages
 import com.guanglu.caliper.ui.pages.UiActions
 import kotlinx.coroutines.CoroutineScope
@@ -189,18 +190,60 @@ class MainActivity : ComponentActivity(), UiActions {
 
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
-        if (resultCode != RESULT_OK) return
-        val uri = data?.data ?: return
+        val label = when (requestCode) {
+            REQ_EXPORT_CSV -> "CSV 导出"
+            REQ_IMPORT_CSV -> "CSV 导入"
+            REQ_DIAGNOSTICS -> "诊断日志导出"
+            REQ_EXPORT_PNG -> "图片导出"
+            else -> return
+        }
+        val uri = data?.data
+        val blocked = safResultMessage(resultCode == RESULT_OK, uri != null, label)
+        if (blocked != null) {
+            toast(blocked)
+            clearPending(requestCode)
+            return
+        }
+        if (uri == null) {
+            toast("$label 失败：未取得文件位置，请重试")
+            clearPending(requestCode)
+            return
+        }
         when (requestCode) {
             REQ_EXPORT_CSV -> container.exportCsv(uri, pendingChannel)
             REQ_IMPORT_CSV -> container.importCsv(uri)
             REQ_DIAGNOSTICS -> container.exportDiagnostics(uri)
-            REQ_EXPORT_PNG -> pendingBitmap?.let { bitmap ->
-                CoroutineScope(Dispatchers.IO).launch {
-                    val ok = container.io.exportPng(uri, bitmap)
-                    runOnUiThread { toast(if (ok) "PNG 已保存" else "PNG 保存失败") }
+            REQ_EXPORT_PNG -> {
+                val bitmap = pendingBitmap
+                if (bitmap == null) {
+                    toast("图片导出失败：图表尚未就绪，请回到数据分析页重试")
+                } else {
+                    CoroutineScope(Dispatchers.IO).launch {
+                        val result = runCatching { container.io.exportPng(uri, bitmap) }
+                        runOnUiThread {
+                            toast(
+                                result.fold(
+                                    onSuccess = { ok ->
+                                        if (ok) "PNG 已保存" else "PNG 保存失败，请检查文件位置后重试"
+                                    },
+                                    onFailure = { error ->
+                                        "图片导出失败：${error.javaClass.simpleName}，请重试"
+                                    }
+                                )
+                            )
+                        }
+                    }
                 }
             }
+        }
+        clearPending(requestCode)
+    }
+
+    /** 每次文件操作结束后清理暂存，避免下次导出复用上一次的通道或图表。 */
+    private fun clearPending(requestCode: Int) {
+        when (requestCode) {
+            REQ_EXPORT_CSV -> pendingChannel = null
+            REQ_EXPORT_PNG -> pendingBitmap = null
         }
     }
 

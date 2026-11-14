@@ -23,6 +23,7 @@ import com.guanglu.caliper.core.database.AppDatabase
 import com.guanglu.caliper.core.datastore.SettingsRepository
 import com.guanglu.caliper.core.model.BEEP_COOLDOWN_MS
 import com.guanglu.caliper.core.model.ChannelPalette
+import com.guanglu.caliper.core.model.IDLE_POLL_INTERVAL_MS
 import com.guanglu.caliper.core.model.shouldBeep
 import com.guanglu.caliper.core.usecase.BatchUseCase
 import com.guanglu.caliper.core.usecase.CaptureMeasurementsUseCase
@@ -63,7 +64,11 @@ class AppContainer(context: Context) {
             diagnostics.log("STORE $count")
             maybeBeep(overLimit)
         },
-        onDiagnostic = { diagnostics.log(it) }
+        onDiagnostic = { diagnostics.log(it) },
+        onStoreFailed = { message ->
+            diagnostics.log(message)
+            mainHandler.post { uiEvent(message) }
+        }
     )
 
     val deviceConfig = DeviceConfigUseCase(database.deviceDao())
@@ -243,7 +248,7 @@ class AppContainer(context: Context) {
         override fun run() {
             val idleMs = settings.idleDisconnectMinutes * 60_000L
             channelManager.pollIdle(System.currentTimeMillis(), idleMs)
-            mainHandler.postDelayed(this, 60L)
+            mainHandler.postDelayed(this, IDLE_POLL_INTERVAL_MS)
         }
     }
 
@@ -270,26 +275,38 @@ class AppContainer(context: Context) {
 
     fun exportCsv(uri: Uri, channelNo: Int? = null) {
         scope.launch {
-            val report = io.exportCsv(uri, channelNo)
-            uiEvent("已导出 ${report.rows} 行 CSV")
+            runCatching { io.exportCsv(uri, channelNo) }
+                .onSuccess { report -> uiEvent("已导出 ${report.rows} 行 CSV") }
+                .onFailure { error -> reportIoFailure("CSV 导出", error) }
         }
     }
 
     fun importCsv(uri: Uri) {
         scope.launch {
-            val report = io.importCsv(uri)
-            uiEvent(
-                "导入 ${report.imported}/${report.rows} 行 · 跳过列 ${report.skippedColumns.size} · " +
-                    "解析失败 ${report.parseErrors} · 重复 ${report.duplicates}"
-            )
+            runCatching { io.importCsv(uri) }
+                .onSuccess { report ->
+                    uiEvent(
+                        "导入 ${report.imported}/${report.rows} 行 · 跳过列 ${report.skippedColumns.size} · " +
+                            "解析失败 ${report.parseErrors} · 重复 ${report.duplicates}"
+                    )
+                }
+                .onFailure { error -> reportIoFailure("CSV 导入", error) }
         }
     }
 
     fun exportDiagnostics(uri: Uri) {
         scope.launch {
-            val lines = diagnostics.export(uri)
-            uiEvent("已导出 $lines 条诊断日志")
+            runCatching { diagnostics.export(uri) }
+                .onSuccess { lines -> uiEvent("已导出 $lines 条诊断日志") }
+                .onFailure { error -> reportIoFailure("诊断日志导出", error) }
         }
+    }
+
+    /** 文件操作失败必须给出可见原因并留下可导出日志，不静默结束协程。 */
+    private fun reportIoFailure(action: String, error: Throwable) {
+        val reason = error.message?.take(60) ?: error.javaClass.simpleName
+        diagnostics.log("IO_FAIL $action ${error.javaClass.simpleName}")
+        uiEvent("$action 失败：$reason，请检查文件位置后重试")
     }
 
     /** 新落库批次含超差数据时播放蜂鸣；开关与冷却由纯策略决定。 */

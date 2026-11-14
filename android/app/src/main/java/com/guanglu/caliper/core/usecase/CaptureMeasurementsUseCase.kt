@@ -28,7 +28,8 @@ class CaptureMeasurementsUseCase(
     private val settings: SettingsRepository,
     private val clocks: Clocks = Clocks(),
     private val onStored: (Int, Boolean) -> Unit = { _, _ -> },
-    private val onDiagnostic: (String) -> Unit = {}
+    private val onDiagnostic: (String) -> Unit = {},
+    private val onStoreFailed: (String) -> Unit = {}
 ) {
     class Clocks(
         val wall: () -> Long = { System.currentTimeMillis() },
@@ -91,7 +92,15 @@ class CaptureMeasurementsUseCase(
             copy
         }
         if (batch.isEmpty()) return
-        val ids = dao.insertAll(batch)
+        val result = runCatching { dao.insertAll(batch) }
+        if (result.isFailure) {
+            synchronized(lock) { buffer.addAll(0, batch) }
+            val reason = result.exceptionOrNull()?.javaClass?.simpleName ?: "数据库异常"
+            onDiagnostic("STORE_FAIL $reason kept=${batch.size}")
+            onStoreFailed("数据保存失败（$reason），本批 ${batch.size} 条已保留待重试")
+            return
+        }
+        val ids = result.getOrThrow()
         val overLimit = batch.any { isOverLimit(it.verdict) }
         withContext(Dispatchers.Main) { onStored(ids.size, overLimit) }
     }

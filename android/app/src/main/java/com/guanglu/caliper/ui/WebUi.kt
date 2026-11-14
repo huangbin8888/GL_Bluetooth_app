@@ -274,7 +274,13 @@ fun Context.webReading(value: String): TextView {
     }
 }
 
-fun Context.webSeg(labels: List<String>, selected: Int, onSelect: (Int) -> Unit): LinearLayout =
+fun Context.webSeg(
+    labels: List<String>,
+    selected: Int,
+    accept: (Int) -> Boolean = { true },
+    onRejected: (Int) -> Unit = {},
+    onSelect: (Int) -> Unit
+): LinearLayout =
     LinearLayout(this).apply {
         orientation = LinearLayout.HORIZONTAL
         background = webDrawable(Web.SEG_BG, dp(9).toFloat())
@@ -300,6 +306,10 @@ fun Context.webSeg(labels: List<String>, selected: Int, onSelect: (Int) -> Unit)
                 elevation = 0f
                 setPadding(0, 0, 0, 0)
                 setOnClickListener {
+                    if (!accept(index)) {
+                        onRejected(index)
+                        return@setOnClickListener
+                    }
                     current = index
                     buttons.forEachIndexed { i, item -> paintSegment(item, i == current) }
                     onSelect(index)
@@ -370,48 +380,60 @@ fun Context.webSpinner(items: List<String>): Spinner = Spinner(this).apply {
     layoutParams = LinearLayout.LayoutParams(dp(112), dp(34))
 }
 
-fun Context.webCheck(title: String, hint: String, checked: Boolean, onChange: (Boolean) -> Unit): LinearLayout =
-    LinearLayout(this).apply {
+/** 勾选行；返回 View 与不触发回调的状态设置器，供互斥选项联动。 */
+fun webCheckPair(
+    context: Context,
+    title: String,
+    hint: String,
+    checked: Boolean,
+    onChange: (Boolean) -> Unit
+): Pair<LinearLayout, (Boolean) -> Unit> {
+    val row = LinearLayout(context).apply {
         orientation = LinearLayout.HORIZONTAL
         gravity = Gravity.CENTER_VERTICAL
-        setPadding(0, dp(11), 0, dp(11))
-    }.also { row ->
-        val ctx = this
-        var state = checked
-        val box = TextView(ctx).apply {
-            text = if (state) "✓" else ""
-            textSize = 13f
-            setTypeface(null, Typeface.BOLD)
-            gravity = Gravity.CENTER
-            setTextColor(Color.WHITE)
-            layoutParams = LinearLayout.LayoutParams(dp(22), dp(22))
-        }
-        val caption = LinearLayout(ctx).apply {
-            orientation = LinearLayout.VERTICAL
-            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply {
-                marginStart = dp(10)
-            }
-        }
-        caption.addView(webBold(title, 13f))
-        caption.addView(webTiny(hint, 10.5f))
-        row.addView(box)
-        row.addView(caption)
-        val paint = {
-            box.text = if (state) "✓" else ""
-            box.background = webDrawable(
-                if (state) Web.PRIMARY else Web.CARD,
-                dp(6).toFloat(),
-                if (state) Web.PRIMARY else 0xFFC6D0DE.toInt(),
-                dp(2)
-            )
-        }
-        paint()
-        row.setOnClickListener {
-            state = !state
-            paint()
-            onChange(state)
+        setPadding(0, context.dp(11), 0, context.dp(11))
+    }
+    var state = checked
+    val box = TextView(context).apply {
+        textSize = 13f
+        setTypeface(null, Typeface.BOLD)
+        gravity = Gravity.CENTER
+        setTextColor(Color.WHITE)
+        layoutParams = LinearLayout.LayoutParams(context.dp(22), context.dp(22))
+    }
+    val caption = LinearLayout(context).apply {
+        orientation = LinearLayout.VERTICAL
+        layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply {
+            marginStart = context.dp(10)
         }
     }
+    caption.addView(context.webBold(title, 13f))
+    caption.addView(context.webTiny(hint, 10.5f))
+    row.addView(box)
+    row.addView(caption)
+    fun paint() {
+        box.text = if (state) "✓" else ""
+        box.background = webDrawable(
+            if (state) Web.PRIMARY else Web.CARD,
+            context.dp(6).toFloat(),
+            if (state) Web.PRIMARY else 0xFFC6D0DE.toInt(),
+            context.dp(2)
+        )
+    }
+    paint()
+    row.setOnClickListener {
+        state = !state
+        paint()
+        onChange(state)
+    }
+    return row to { value ->
+        state = value
+        paint()
+    }
+}
+
+fun Context.webCheck(title: String, hint: String, checked: Boolean, onChange: (Boolean) -> Unit): LinearLayout =
+    webCheckPair(this, title, hint, checked, onChange).first
 
 fun Context.webStat(value: String, caption: String): LinearLayout = LinearLayout(this).apply {
     orientation = LinearLayout.VERTICAL

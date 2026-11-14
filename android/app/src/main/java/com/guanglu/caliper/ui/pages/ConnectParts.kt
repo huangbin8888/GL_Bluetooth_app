@@ -5,6 +5,7 @@ import android.os.Handler
 import android.os.Looper
 import android.view.Gravity
 import android.view.View
+import android.widget.Button
 import android.widget.LinearLayout
 import android.widget.TextView
 import com.guanglu.caliper.AppContainer
@@ -110,6 +111,7 @@ internal class ScanSession(
     private val handler = Handler(Looper.getMainLooper())
     private var pendingTimeout: Runnable? = null
     private val registry = ScanRegistry()
+    private val deviceButtons = LinkedHashMap<String, Button>()
 
     fun stop() {
         pendingTimeout?.let { handler.removeCallbacks(it) }
@@ -126,20 +128,35 @@ internal class ScanSession(
     /** 当前扫描到的设备（按发现顺序）。 */
     fun devices(): List<ScannedDevice> = registry.devices
 
-    /** 以 MAC 为键重建列表，重复广播原地更新，绝不产生重复条目。 */
+    /** 以 MAC 为键复用按钮，只更新文字，避免广播刷新时替换 View 打断点击。 */
     private fun rebuild() {
-        list.removeAllViews()
-        registry.devices.forEach { device ->
-            val title = "${device.name} · ${device.mac.takeLast(4)} · ${device.rssi}dBm"
-            list.addView(list.context.webButton(title, small = true) {
-                actions.toast("正在连接 ${device.mac.takeLast(4)}…")
-                if (!c.connect(device.mac)) {
-                    actions.toast("通道已满，未连接 ${device.mac.takeLast(4)}")
-                }
-                onConnected()
-            })
+        val devices = registry.devices
+        val live = devices.map { it.mac }.toSet()
+        val iterator = deviceButtons.iterator()
+        while (iterator.hasNext()) {
+            val entry = iterator.next()
+            if (entry.key !in live) {
+                list.removeView(entry.value)
+                iterator.remove()
+            }
+        }
+        devices.forEach { device ->
+            val button = deviceButtons[device.mac] ?: createDeviceButton(device.mac).also {
+                deviceButtons[device.mac] = it
+                list.addView(it)
+            }
+            button.text = "${device.name} · ${device.mac.takeLast(4)} · ${device.rssi}dBm"
         }
     }
+
+    private fun createDeviceButton(mac: String): Button =
+        list.context.webButton(mac.takeLast(4), small = true) {
+            actions.toast("正在连接 ${mac.takeLast(4)}…")
+            if (!c.connect(mac)) {
+                actions.toast("通道已满，未连接 ${mac.takeLast(4)}")
+            }
+            onConnected()
+        }
 
     fun start() {
         val reason = c.scanReadiness()

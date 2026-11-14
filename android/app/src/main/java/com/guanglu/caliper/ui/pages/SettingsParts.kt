@@ -108,14 +108,19 @@ private fun namActionRow(
                 return@webButton
             }
             CoroutineScope(Dispatchers.Main).launch {
-                val device = c.deviceConfig.load(mac)
-                val current = device?.customName ?: device?.name
-                if (current == null) {
-                    actions.toast("本地未登记 ${mac.takeLast(4)} 的名称")
-                } else {
-                    nameInput.setText(current)
-                    actions.toast("已填入本地登记名：$current")
-                }
+                runCatching { c.deviceConfig.load(mac) }
+                    .onSuccess { device ->
+                        val current = device?.customName ?: device?.name
+                        if (current == null) {
+                            actions.toast("本地未登记 ${mac.takeLast(4)} 的名称")
+                        } else {
+                            nameInput.setText(current)
+                            actions.toast("已填入本地登记名：$current")
+                        }
+                    }
+                    .onFailure { error ->
+                        actions.toast("读取登记名失败：${error.javaClass.simpleName}，请重试")
+                    }
             }
         }
     )
