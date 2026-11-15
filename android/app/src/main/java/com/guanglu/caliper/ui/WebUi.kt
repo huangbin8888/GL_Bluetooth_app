@@ -6,6 +6,7 @@ import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
 import android.text.SpannableString
 import android.text.Spanned
+import android.text.TextUtils
 import android.text.style.AbsoluteSizeSpan
 import android.text.style.ForegroundColorSpan
 import android.view.Gravity
@@ -18,9 +19,18 @@ import android.widget.Spinner
 import android.widget.Switch
 import android.widget.TextView
 import com.guanglu.caliper.core.database.entity.Measurement
+import com.guanglu.caliper.core.model.CHANNEL_FILTER_COLUMNS
+import com.guanglu.caliper.core.model.CHIP_DOT_DP
+import com.guanglu.caliper.core.model.CHIP_GAP_DP
+import com.guanglu.caliper.core.model.CHIP_MIN_HEIGHT_DP
+import com.guanglu.caliper.core.model.CHIP_PADDING_H_DP
+import com.guanglu.caliper.core.model.CHIP_PADDING_V_DP
+import com.guanglu.caliper.core.model.CHIP_ROW_GAP_DP
+import com.guanglu.caliper.core.model.CHIP_TEXT_SIZE_SP
 import com.guanglu.caliper.core.model.ChannelPalette
 import com.guanglu.caliper.core.model.Units
 import com.guanglu.caliper.core.model.ValueTone
+import com.guanglu.caliper.core.model.channelFilterPlaceholders
 import com.guanglu.caliper.core.model.valueToneOf
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -260,6 +270,51 @@ fun Context.webChipFlow(items: List<View>): LinearLayout = LinearLayout(this).ap
     }
 }
 
+/** 通道筛选按钮的等宽网格；末行补占位保持列对齐。 */
+fun Context.webChannelFilterFlow(items: List<View>): LinearLayout = LinearLayout(this).apply {
+    orientation = LinearLayout.VERTICAL
+    layoutParams = LinearLayout.LayoutParams(
+        LinearLayout.LayoutParams.MATCH_PARENT,
+        LinearLayout.LayoutParams.WRAP_CONTENT
+    ).apply { bottomMargin = dp(9) }
+}.also { grid ->
+    val ctx = this
+    items.chunked(CHANNEL_FILTER_COLUMNS).forEach { group ->
+        val line = LinearLayout(ctx).apply {
+            orientation = LinearLayout.HORIZONTAL
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            )
+        }
+        group.forEach { item ->
+            item.layoutParams = LinearLayout.LayoutParams(
+                0,
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+                1f
+            ).apply {
+                marginStart = dp(CHIP_GAP_DP)
+                marginEnd = dp(CHIP_GAP_DP)
+                bottomMargin = dp(CHIP_ROW_GAP_DP)
+            }
+            line.addView(item)
+        }
+        repeat(channelFilterPlaceholders(group.size)) {
+            line.addView(View(ctx).apply {
+                layoutParams = LinearLayout.LayoutParams(
+                    0,
+                    LinearLayout.LayoutParams.WRAP_CONTENT,
+                    1f
+                ).apply {
+                    marginStart = dp(CHIP_GAP_DP)
+                    marginEnd = dp(CHIP_GAP_DP)
+                }
+            })
+        }
+        grid.addView(line)
+    }
+}
+
 fun Context.webReading(value: String): TextView {
     val span = SpannableString("$value mm")
     val unitStart = value.length + 1
@@ -479,14 +534,20 @@ fun Context.webFileLine(text: String): TextView = label(text, 11.5f, false, Web.
 fun Context.webChChip(text: String, dotColor: Int, on: Boolean, onClick: () -> Unit): LinearLayout =
     LinearLayout(this).apply {
         orientation = LinearLayout.HORIZONTAL
-        gravity = Gravity.CENTER_VERTICAL
+        gravity = Gravity.CENTER
+        minimumHeight = dp(CHIP_MIN_HEIGHT_DP)
         background = webDrawable(
             if (on) Web.PRIMARY_SOFT else Web.CARD,
             dp(18).toFloat(),
             if (on) Web.CHIP_ACTIVE_BORDER else Web.LINE,
             1
         )
-        setPadding(dp(9), dp(5), dp(9), dp(5))
+        setPadding(
+            dp(CHIP_PADDING_H_DP),
+            dp(CHIP_PADDING_V_DP),
+            dp(CHIP_PADDING_H_DP),
+            dp(CHIP_PADDING_V_DP)
+        )
         isClickable = true
         setOnClickListener { onClick() }
     }.also { chip ->
@@ -494,10 +555,15 @@ fun Context.webChChip(text: String, dotColor: Int, on: Boolean, onClick: () -> U
         if (dotColor != 0) {
             chip.addView(View(ctx).apply {
                 background = webDrawable(dotColor, dp(4).toFloat())
-                layoutParams = LinearLayout.LayoutParams(dp(8), dp(8)).apply { marginEnd = dp(5) }
+                layoutParams = LinearLayout.LayoutParams(dp(CHIP_DOT_DP), dp(CHIP_DOT_DP)).apply {
+                    marginEnd = dp(6)
+                }
             })
         }
-        chip.addView(label(text, 11f, true, if (on) Web.PRIMARY else Web.TEXT))
+        chip.addView(label(text, CHIP_TEXT_SIZE_SP, true, if (on) Web.PRIMARY else Web.TEXT).apply {
+            maxLines = 1
+            ellipsize = TextUtils.TruncateAt.END
+        })
     }
 
 fun Context.webChMark(channelNo: Int): TextView = TextView(this).apply {

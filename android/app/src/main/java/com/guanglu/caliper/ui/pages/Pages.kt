@@ -265,7 +265,7 @@ object Pages {
         }
         fun renderChips() {
             chipHost.removeAllViews()
-            chipHost.addView(webChipFlow(channelChips(context, focus) { picked ->
+            chipHost.addView(webChannelFilterFlow(channelChips(context, focus) { picked ->
                 focus = picked
                 renderChips()
                 renderTable()
@@ -651,7 +651,7 @@ object Pages {
         }
         fun renderChips() {
             chipHost.removeAllViews()
-            chipHost.addView(webChipFlow(channelChips(context, focus) { picked ->
+            chipHost.addView(webChannelFilterFlow(channelChips(context, focus) { picked ->
                 focus = picked
                 renderChips()
                 renderChart()
