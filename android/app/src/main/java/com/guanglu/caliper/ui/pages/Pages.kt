@@ -15,6 +15,7 @@ import com.guanglu.caliper.core.model.ChannelPalette
 import com.guanglu.caliper.core.model.Units
 import com.guanglu.caliper.core.model.acceptedSegmentIndex
 import com.guanglu.caliper.core.model.batchConnectMessage
+import com.guanglu.caliper.core.model.commandFeedback
 import com.guanglu.caliper.core.model.statisticsTexts
 import com.guanglu.caliper.core.model.valueToneOf
 import com.guanglu.caliper.ui.*
@@ -399,19 +400,16 @@ object Pages {
             modeButton.text = if (c.isContinuous(selected)) "切换为手动" else "切换为连续"
         }
 
-        fun send(command: CaliperCommand, label: String): Boolean {
+        fun send(command: CaliperCommand, label: String, notifySent: Boolean = true): Boolean {
             val online = onlineChannels()
             if (selected !in online) {
                 selected = online.firstOrNull() ?: 0
                 renderTarget()
             }
-            if (selected == 0) {
-                actions.toast("当前无在线通道，请先到「连接」页连接卡尺")
-                return false
-            }
-            val ok = c.sendCommand(selected, command)
-            if (!ok) actions.toast("CH$selected 未连接卡尺，$label 未下发（只影响该通道）")
-            return ok
+            val channelNo = selected
+            val sent = channelNo != 0 && c.sendCommand(channelNo, command)
+            commandFeedback(channelNo, label, sent, notifySent)?.let { actions.toast(it) }
+            return sent
         }
 
         renderTarget()
@@ -428,7 +426,7 @@ object Pages {
             }
             val wantContinuous = !c.isContinuous(channelNo)
             val target = if (wantContinuous) CaliperCommand.MOD_CONTINUOUS else CaliperCommand.MOD_MANUAL
-            if (send(target, "模式切换")) {
+            if (send(target, "模式切换", notifySent = false)) {
                 c.setContinuous(channelNo, wantContinuous)
                 renderTarget()
                 actions.toast("CH$channelNo 已切为${if (wantContinuous) "连续" else "手动"}，其他通道不受影响")

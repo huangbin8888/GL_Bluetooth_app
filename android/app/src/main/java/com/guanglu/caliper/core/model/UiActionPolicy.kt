@@ -29,6 +29,23 @@ internal fun batchConnectMessage(total: Int, accepted: Int): String =
         else -> "正在连接 $accepted 台卡尺"
     }
 
+/**
+ * 命令下发后的即时反馈文案；null 表示该分支已有专用提示，避免重复弹窗。
+ *
+ * @author AI-Generated
+ */
+internal fun commandFeedback(
+    channelNo: Int,
+    label: String,
+    sent: Boolean,
+    notifySent: Boolean = true
+): String? = when {
+    channelNo == 0 -> "当前无在线通道，请先到「连接」页连接卡尺"
+    !sent -> "CH$channelNo 未连接卡尺，$label 未下发（只影响该通道）"
+    !notifySent -> null
+    else -> "$label 已下发到 CH$channelNo，等待卡尺回数"
+}
+
 /** 分段控件的选择；超过已实现上限时保持原段，避免视觉切换但功能未切换。 */
 internal fun acceptedSegmentIndex(current: Int, picked: Int, maxImplemented: Int = 0): Int =
     if (picked in 0..maxImplemented) picked else current

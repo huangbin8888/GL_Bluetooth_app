@@ -219,6 +219,18 @@ class ButtonContractTest {
         assertEquals(ExportAction.CHANNEL_FILES, exportAction(false, false, true))
     }
 
+    @Test
+    fun commandSendIsWiredToVisibleFeedback() {
+        val pages = read("ui/pages/Pages.kt")
+        val start = pages.indexOf("fun send(command: CaliperCommand")
+        assertTrue("缺少 send() 函数", start >= 0)
+        val sendBody = lambdaBody(pages, start)
+        assertTrue("send() 未把下发结果转成提示", sendBody.contains("commandFeedback("))
+        assertTrue("send() 未显示提示", sendBody.contains("actions.toast"))
+        assertTrue("模式切换未抑制重复提示", pages.contains("notifySent = false"))
+        assertTrue("成功下发文案缺失", read("core/model/UiActionPolicy.kt").contains("等待卡尺回数"))
+    }
+
     private companion object {
         const val SOURCE_PATH = "src/main/java/com/guanglu/caliper"
         const val EXPECTED_BUTTON_SITES = 39

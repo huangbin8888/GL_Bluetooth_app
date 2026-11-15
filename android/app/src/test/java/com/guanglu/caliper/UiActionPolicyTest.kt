@@ -5,6 +5,7 @@ import com.guanglu.caliper.core.model.IDLE_POLL_INTERVAL_MS
 import com.guanglu.caliper.core.model.STAT_PLACEHOLDER
 import com.guanglu.caliper.core.model.acceptedSegmentIndex
 import com.guanglu.caliper.core.model.batchConnectMessage
+import com.guanglu.caliper.core.model.commandFeedback
 import com.guanglu.caliper.core.model.exportAction
 import com.guanglu.caliper.core.model.parseDecimals
 import com.guanglu.caliper.core.model.safResultMessage
@@ -156,5 +157,65 @@ class UiActionPolicyTest {
     fun idlePollIsNotMillisecondLoop() {
         assertTrue(IDLE_POLL_INTERVAL_MS >= 1_000L)
         assertTrue(IDLE_POLL_INTERVAL_MS <= 60_000L)
+    }
+
+    @Test
+    fun successfulCommandHasVisibleFeedback() {
+        assertEquals(
+            "采集 MEAS 已下发到 CH1，等待卡尺回数",
+            commandFeedback(1, "采集 MEAS", sent = true)
+        )
+    }
+
+    @Test
+    fun successfulFeedbackNamesChannelAndCommand() {
+        val message = commandFeedback(3, "清零 CLR", sent = true)
+        assertTrue(message!!.contains("CH3"))
+        assertTrue(message.contains("清零 CLR"))
+        assertTrue(message.contains("已下发"))
+    }
+
+    @Test
+    fun everyCaptureCommandLabelIsEchoed() {
+        listOf("记录一条", "采集 MEAS", "清零 CLR").forEach { label ->
+            assertTrue(commandFeedback(2, label, sent = true)!!.contains(label))
+        }
+    }
+
+    @Test
+    fun noOnlineChannelKeepsOriginalPrompt() {
+        assertEquals(
+            "当前无在线通道，请先到「连接」页连接卡尺",
+            commandFeedback(0, "记录一条", sent = false)
+        )
+    }
+
+    @Test
+    fun failedSendKeepsOriginalPrompt() {
+        assertEquals(
+            "CH2 未连接卡尺，记录一条 未下发（只影响该通道）",
+            commandFeedback(2, "记录一条", sent = false)
+        )
+    }
+
+    @Test
+    fun modeSwitchSuppressesDuplicateToast() {
+        assertNull(commandFeedback(1, "模式切换", sent = true, notifySent = false))
+    }
+
+    @Test
+    fun suppressionDoesNotHideFailures() {
+        assertEquals(
+            "CH2 未连接卡尺，模式切换 未下发（只影响该通道）",
+            commandFeedback(2, "模式切换", sent = false, notifySent = false)
+        )
+    }
+
+    @Test
+    fun noOnlineChannelWinsOverSuppression() {
+        assertEquals(
+            "当前无在线通道，请先到「连接」页连接卡尺",
+            commandFeedback(0, "模式切换", sent = true, notifySent = false)
+        )
     }
 }
