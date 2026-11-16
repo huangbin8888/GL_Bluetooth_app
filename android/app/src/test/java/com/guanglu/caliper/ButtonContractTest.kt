@@ -65,6 +65,10 @@ class ButtonContractTest {
 
     private fun read(relativePath: String): String = File(sourceRoot, relativePath).readText(Charsets.UTF_8)
 
+    /** 读取 app/src/main 下的文件，用于校验清单权限等非 java 目录的接线。 */
+    private fun readMainFile(relativePath: String): String =
+        File(sourceRoot, "../../../../$relativePath").readText(Charsets.UTF_8)
+
     private fun lambdaBody(text: String, from: Int): String {
         val start = text.indexOf('{', from)
         if (start < 0) return ""
@@ -327,15 +331,74 @@ class ButtonContractTest {
         assertTrue(tableColumnsFit())
     }
 
+    @Test
+    fun bluetoothRecoveryAndKnownDevicesAreWired() {
+        val container = read("AppContainer.kt")
+        assertTrue("未监听系统蓝牙开关", container.contains("BluetoothAdapter.ACTION_STATE_CHANGED"))
+        assertTrue("未注册蓝牙广播", container.contains("fun registerBluetoothWatcher()"))
+        assertTrue("蓝牙恢复未触发补连循环", container.contains("startRecoveryCycle()"))
+        assertTrue("补连循环缺少终止策略", container.contains("recoveryDecision(recoveryTick"))
+        assertTrue("补连目标未按已登记设备去重", container.contains("recoveryTargets(recent"))
+        assertTrue("扫描命中未接自动补连", container.contains("fun autoConnectScanned(mac: String)"))
+        val pages = read("ui/pages/Pages.kt")
+        assertTrue("连接页未常驻显示已登记设备", pages.contains("renderKnownDevices(context, c, actions"))
+        assertTrue("连接页未监听蓝牙恢复", pages.contains("watchBluetoothRecovery(context, c, page)"))
+        val recovery = read("ui/pages/ConnectRecoveryParts.kt")
+        assertTrue("已登记设备缺少手动重连入口", recovery.contains("webButton(\"重连\", small = true)"))
+        assertTrue("已登记设备列表未复用按钮状态说明", recovery.contains("knownDevicesCaption("))
+        assertTrue("扫描回调未触发自动补连", read("ui/pages/ConnectParts.kt").contains("c.autoConnectScanned(device.mac)"))
+    }
+
+    @Test
+    fun toastBubbleReplacesSystemToastWithBoundedSize() {
+        val activity = read("ui/MainActivity.kt")
+        assertFalse("仍在使用会排队且停留长的系统 Toast", activity.contains("Toast.makeText"))
+        assertTrue("气泡未挂载到独立浮层", activity.contains("addContentView("))
+        assertTrue("气泡停留时长未接入策略", activity.contains("bubbleDurationMs(message.length)"))
+        assertTrue("气泡宽度未封顶", activity.contains("bubbleMaxWidthPx("))
+        assertTrue("气泡未区分警示色", activity.contains("bubbleFill(tone)"))
+        assertTrue("新消息未替换旧气泡", activity.contains("bubbleHost.removeAllViews()"))
+        assertTrue("旧气泡计时未取消", activity.contains("bubbleHandler.removeCallbacks(it)"))
+        assertTrue("气泡未限制行数", activity.contains("maxLines = BUBBLE_MAX_LINES"))
+    }
+
+    @Test
+    fun chartRendersNumericValuesAndTimeAxis() {
+        val chart = read("ui/chart/ChartCanvasView.kt")
+        assertTrue("缺少右侧 mm 数值刻度", chart.contains("chartAxisTicks(low, high"))
+        assertTrue("缺少横轴时间线", chart.contains("chartTimeTicks("))
+        assertTrue("缺少数值标注点策略", chart.contains("chartValueLabelIndices("))
+        assertTrue("刻度未格式化为 mm 数值", chart.contains("Units.formatMm(tick, decimals)"))
+        assertTrue("缺少最新值行情标签", chart.contains("drawRoundRect("))
+        assertTrue("缺少涨跌色调", chart.contains("trendToneOf("))
+        val pages = read("ui/pages/Pages.kt")
+        assertTrue("分析页未传入带时间戳样本", pages.contains("chart.samples = ordered.map"))
+        assertTrue("分析页未显示行情概览", pages.contains("chartHeadline(chart.samples"))
+        assertTrue("分析页未跟随小数位设置", pages.contains("chart.decimals = c.settings.decimals"))
+    }
+
+    @Test
+    fun overLimitAlertIsAudibleVisibleAndVibrating() {
+        val beep = read("core/audio/OverLimitBeep.kt")
+        assertTrue("蜂鸣未改为三连脉冲", beep.contains("beepPulseDelays()"))
+        assertTrue("未接入高音量参数", beep.contains("BEEP_VOLUME_PERCENT"))
+        assertTrue("未接入振动波形", beep.contains("beepVibrationPattern()"))
+        assertTrue("新一轮未取消旧脉冲", beep.contains("cancelPulses()"))
+        assertTrue("清单未声明振动权限", readMainFile("AndroidManifest.xml").contains("android.permission.VIBRATE"))
+        assertTrue("超差未给出红色警示气泡", read("AppContainer.kt").contains("overLimitAlertMessage()"))
+        assertTrue("设置页未同步三连提醒文案", read("ui/pages/SettingsParts.kt").contains("三连蜂鸣"))
+    }
+
     private companion object {
         const val SOURCE_PATH = "src/main/java/com/guanglu/caliper"
-        const val EXPECTED_BUTTON_SITES = 39
+        const val EXPECTED_BUTTON_SITES = 40
         val BUTTON_PATTERN = Regex("webButton\\(\\s*\"([^\"]+)\"")
         val SWITCH_PATTERN = Regex("setOnCheckedChangeListener")
         val BUTTON_FILES = listOf(
             "ui/pages/Pages.kt",
             "ui/pages/ExportSettingsPages.kt",
-            "ui/pages/SettingsParts.kt"
+            "ui/pages/SettingsParts.kt",
+            "ui/pages/ConnectRecoveryParts.kt"
         )
     }
 }

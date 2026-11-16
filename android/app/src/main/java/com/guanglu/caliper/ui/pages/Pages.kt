@@ -13,9 +13,11 @@ import com.guanglu.caliper.core.bluetooth.device.CaliperCommand
 import com.guanglu.caliper.core.database.entity.Measurement
 import com.guanglu.caliper.core.model.ChannelPalette
 import com.guanglu.caliper.core.model.Units
+import com.guanglu.caliper.core.model.ChartSample
 import com.guanglu.caliper.core.model.acceptedSegmentIndex
 import com.guanglu.caliper.core.model.batchConnectMessage
 import com.guanglu.caliper.core.model.channelDeviceTags
+import com.guanglu.caliper.core.model.chartHeadline
 import com.guanglu.caliper.core.model.commandFeedback
 import com.guanglu.caliper.core.model.measurementDeviceName
 import com.guanglu.caliper.core.model.statisticsTexts
@@ -193,13 +195,31 @@ object Pages {
         val list = LinearLayout(context).apply { orientation = LinearLayout.VERTICAL }
         listCard.addView(list)
         col.addView(listCard)
+        val knownCard = webCard()
+        knownCard.addView(webCardTitle("已连接过的卡尺"))
+        val knownHint = webTiny("正在读取已登记的卡尺…")
+        knownCard.addView(knownHint)
+        val knownList = LinearLayout(context).apply { orientation = LinearLayout.VERTICAL }
+        knownCard.addView(knownList)
+        col.addView(knownCard)
+        renderKnownDevices(context, c, actions, knownHint, knownList)
+
         val slotLabels = mutableListOf<TextView>()
         col.addView(channelSlotsCard(context, slotLabels))
 
         val session = ScanSession(c, actions, list, hint) { refreshConnect(c, state, slotLabels) }
         stopScanOnDetach(page) { session.stop() }
+        watchBluetoothRecovery(context, c, page) {
+            session.start()
+            renderKnownDevices(context, c, actions, knownHint, knownList)
+            refreshConnect(c, state, slotLabels)
+            actions.toast("蓝牙已恢复，正在重新扫描并自动重连已登记的卡尺")
+        }
         col.addView(webBtnRow(
-            webButton("扫描设备", primary = true) { session.start() },
+            webButton("扫描设备", primary = true) {
+                session.start()
+                renderKnownDevices(context, c, actions, knownHint, knownList)
+            },
             webButton("全部断开", danger = true) {
                 val count = c.disconnectAll()
                 session.reset()
@@ -627,7 +647,7 @@ object Pages {
         val chart = ChartCanvasView(context).apply {
             layoutParams = LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
-                dp(280)
+                dp(320)
             )
         }
         col.addView(webSeg(listOf("折线图", "柱状图"), 0) { index ->
@@ -640,10 +660,12 @@ object Pages {
         col.addView(chipHost)
         col.addView(webChipFlow(listOf(
             webChip("批次：本地", WebTone.BLUE),
-            webChip("点按通道着色 · 超差描红"),
-            webChip("折线 / 柱状可切换")
+            webChip("mm 数值刻度 + 时间线"),
+            webChip("最新值涨跌 · 涨红跌绿")
         )))
         val chartCard = webCard()
+        val headline = webTiny("暂无测量数据 · 连接卡尺后自动绘制", 12f, Web.TEXT)
+        chartCard.addView(headline)
         chartCard.addView(chart)
         col.addView(chartCard)
 
@@ -662,9 +684,15 @@ object Pages {
         var lastChipTags: Map<Int, String> = emptyMap()
         fun renderChart() {
             val shown = if (focus == 0) latest else latest.filter { it.channelNo == focus }
-            chart.points = shown.reversed().map { it.channelNo to it.valueUm10 }
+            val ordered = shown.reversed()
+            chart.points = ordered.map { it.channelNo to it.valueUm10 }
+            chart.samples = ordered.map {
+                ChartSample(it.channelNo, it.valueUm10, it.capturedAt, it.verdict)
+            }
+            chart.decimals = c.settings.decimals
             chart.lowerUm10 = c.settings.lowerLimitUm10
             chart.upperUm10 = c.settings.upperLimitUm10
+            headline.text = chartHeadline(chart.samples, c.settings.decimals)
             chart.invalidate()
             (total.getChildAt(0) as TextView).text = "${shown.size}"
             val stats = statisticsTexts(shown.map { it.valueUm10 }, c.settings.decimals)

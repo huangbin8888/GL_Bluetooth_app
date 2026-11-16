@@ -181,7 +181,7 @@ private fun registrationFields(
 }
 
 /**
- * 超差蜂鸣开关：新采集数据判定超差时响一声，可关闭。
+ * 超差提醒开关：新采集数据判定超差时响三声并振动，可关闭。
  *
  * @author AI-Generated
  */
@@ -193,7 +193,7 @@ internal fun overLimitBeepField(
     val toggle = webSwitch(c.settings.overLimitBeep)
     toggle.setOnCheckedChangeListener { _, checked ->
         c.settings.overLimitBeep = checked
-        actions.toast(if (checked) "已开启超差蜂鸣：超差时响一声" else "已关闭超差蜂鸣")
+        actions.toast(if (checked) "已开启超差提醒：三连蜂鸣 + 振动 + 红色警示气泡" else "已关闭超差提醒")
     }
-    webField("超差蜂鸣", "新数据判定超差时响一声；连续超差 1.5 秒内不重复", toggle)
+    webField("超差提醒", "超差时三连蜂鸣 + 振动 + 红色气泡；连续超差 1.2 秒内不重复", toggle)
 }

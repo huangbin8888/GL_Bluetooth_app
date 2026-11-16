@@ -1,8 +1,12 @@
 package com.guanglu.caliper
 
 import android.Manifest
+import android.bluetooth.BluetoothAdapter
 import android.bluetooth.BluetoothManager
+import android.content.BroadcastReceiver
 import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
 import android.content.pm.PackageManager
 import android.location.LocationManager
 import android.net.Uri
@@ -22,9 +26,20 @@ import com.guanglu.caliper.core.bluetooth.device.CaliperCommand
 import com.guanglu.caliper.core.database.AppDatabase
 import com.guanglu.caliper.core.datastore.SettingsRepository
 import com.guanglu.caliper.core.model.BEEP_COOLDOWN_MS
+import com.guanglu.caliper.core.model.BT_STATE_OFF
+import com.guanglu.caliper.core.model.BT_STATE_ON
+import com.guanglu.caliper.core.model.BluetoothRecoveryAction
 import com.guanglu.caliper.core.model.ChannelPalette
 import com.guanglu.caliper.core.model.IDLE_POLL_INTERVAL_MS
+import com.guanglu.caliper.core.model.MAX_RECOVERY_TICKS
+import com.guanglu.caliper.core.model.RECOVERY_INTERVAL_MS
+import com.guanglu.caliper.core.model.RecoveryDecision
+import com.guanglu.caliper.core.model.bluetoothRecoveryAction
 import com.guanglu.caliper.core.model.deviceDisplayName
+import com.guanglu.caliper.core.model.overLimitAlertMessage
+import com.guanglu.caliper.core.model.recoveryDecision
+import com.guanglu.caliper.core.model.recoveryTargets
+import com.guanglu.caliper.core.model.shouldAutoConnectScanned
 import com.guanglu.caliper.core.model.shouldBeep
 import com.guanglu.caliper.core.usecase.BatchUseCase
 import com.guanglu.caliper.core.usecase.CaptureMeasurementsUseCase
@@ -41,6 +56,13 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 
 /**
+ * 连接页展示的已登记卡尺摘要。
+ *
+ * @author AI-Generated
+ */
+data class KnownDevice(val mac: String, val name: String, val lastConnectedAt: Long)
+
+/**
  * 手工依赖组装，向 ui/ 提供 usecase 与通道门面。
  *
  * @author AI-Generated
@@ -51,7 +73,7 @@ class AppContainer(context: Context) {
     val settings = SettingsRepository(context)
     val diagnostics = DiagnosticsUseCase(context)
     private val database = AppDatabase.build(context)
-    private val overLimitBeep = OverLimitBeep { diagnostics.log(it) }
+    private val overLimitBeep = OverLimitBeep(context) { diagnostics.log(it) }
     private var lastBeepAt = 0L
 
     private val transport = BlessedTransport(
@@ -92,6 +114,14 @@ class AppContainer(context: Context) {
     private val scanRegistry = ScanRegistry()
     private val continuousModes = ConcurrentHashMap<Int, Boolean>()
 
+    /** 已登记 MAC 缓存，扫描命中时用于判定是否自动补连。 */
+    @Volatile
+    private var knownMacs: Set<String> = emptySet()
+
+    @Volatile
+    private var bluetoothState = -1
+    private var recoveryTick = 0
+
     fun isContinuous(channelNo: Int): Boolean = continuousModes[channelNo] == true
     fun setContinuous(channelNo: Int, enabled: Boolean) {
         continuousModes[channelNo] = enabled
@@ -126,6 +156,7 @@ class AppContainer(context: Context) {
     fun channelSlots(): Map<Int, String> = channelManager.channelSlots()
     fun disconnectAll(): Int {
         cancelAllReconnects()
+        stopRecoveryCycle()
         return channelManager.disconnectAll()
     }
 
@@ -206,6 +237,140 @@ class AppContainer(context: Context) {
         }
     }
 
+    /** 已登记卡尺摘要；连接页据此常驻显示，即使本轮未扫描到也可见。 */
+    suspend fun knownDevices(): List<KnownDevice> =
+        deviceConfig.recentDevices(ChannelPalette.MAX_CHANNELS).map { device ->
+            KnownDevice(
+                mac = device.mac,
+                name = deviceDisplayName(device.name, device.customName, device.mac),
+                lastConnectedAt = device.lastConnectedAt
+            )
+        }
+
+    /** 刷新已登记 MAC 缓存；连接成功会立即追加，避免重启扫描时查库滞后。 */
+    private fun refreshKnownMacs() {
+        scope.launch {
+            val loaded = runCatching {
+                deviceConfig.recentDevices(ChannelPalette.MAX_CHANNELS)
+                    .map { it.mac.trim().uppercase() }
+                    .toSet()
+            }.getOrElse { error ->
+                diagnostics.log("KNOWN_MAC_LOAD_FAIL ${error.javaClass.simpleName}")
+                knownMacs
+            }
+            knownMacs = loaded
+            diagnostics.log("KNOWN_MAC_LOADED ${loaded.size}")
+        }
+    }
+
+    /** 扫描重新发现已登记卡尺时自动补连；每个跳过分支都留诊断，不静默失败。 */
+    fun autoConnectScanned(mac: String) {
+        val key = mac.trim().uppercase()
+        if (!settings.autoConnect) {
+            diagnostics.log("SCAN_AUTO_SKIP $key autoConnect=off")
+            return
+        }
+        scope.launch {
+            val recent = runCatching {
+                deviceConfig.recentDevices(ChannelPalette.MAX_CHANNELS)
+                    .map { it.mac.trim().uppercase() }
+                    .toSet()
+            }.getOrElse { error ->
+                diagnostics.log("SCAN_AUTO_KNOWN_FAIL ${error.javaClass.simpleName}")
+                knownMacs
+            }
+            val online = channelManager.channelSlots().values.map { it.uppercase() }.toSet()
+            val pending = channelManager.pendingMacs().map { it.uppercase() }.toSet()
+            if (!shouldAutoConnectScanned(key, recent, online, pending, settings.autoConnect)) {
+                if (eventThrottle.allow("scan_auto_skip:$key")) {
+                    diagnostics.log("SCAN_AUTO_SKIP $key known=${key in recent} online=${key in online}")
+                }
+                return@launch
+            }
+            diagnostics.log("SCAN_AUTO_CONNECT $key")
+            mainHandler.post {
+                channelManager.requestConnect(key)
+                if (eventThrottle.allow("scan_auto:$key")) {
+                    uiEvent("已重新发现 ${key.takeLast(4)}，正在自动连接…")
+                }
+            }
+        }
+    }
+
+    /** 监听系统蓝牙开关；关闭再打开时清零重连预算并启动有限次补连。 */
+    private fun registerBluetoothWatcher() {
+        val adapter = (appContext.getSystemService(Context.BLUETOOTH_SERVICE) as? BluetoothManager)?.adapter
+        bluetoothState = if (adapter?.isEnabled == true) BT_STATE_ON else BT_STATE_OFF
+        val filter = IntentFilter(BluetoothAdapter.ACTION_STATE_CHANGED)
+        val sticky = ContextCompat.registerReceiver(
+            appContext, bluetoothReceiver, filter, ContextCompat.RECEIVER_NOT_EXPORTED
+        )
+        diagnostics.log("BT_WATCHER_REGISTERED state=$bluetoothState sticky=${sticky != null}")
+    }
+
+    private fun onBluetoothStateChanged(previous: Int, current: Int) {
+        diagnostics.log("BT_STATE $previous -> $current")
+        when (bluetoothRecoveryAction(previous, current)) {
+            BluetoothRecoveryAction.RECOVER -> {
+                synchronized(reconnectLock) {
+                    reconnectAttempts.clear()
+                    reconnectStopped.clear()
+                }
+                lastAutoConnectMs = 0L
+                startRecoveryCycle()
+                if (eventThrottle.allow("bt_recover")) {
+                    uiEvent("蓝牙已恢复，正在重连已登记的卡尺…")
+                }
+            }
+            BluetoothRecoveryAction.SUSPEND -> {
+                stopRecoveryCycle()
+                if (eventThrottle.allow("bt_off")) {
+                    uiEvent("系统蓝牙已关闭，重新打开后会自动重连已登记的卡尺")
+                }
+            }
+            BluetoothRecoveryAction.NONE -> Unit
+        }
+    }
+
+    /** 蓝牙恢复后按固定轮次补连；每轮都有终止判定，不会无限 postDelayed。 */
+    private fun startRecoveryCycle() {
+        mainHandler.removeCallbacks(recoveryRunnable)
+        recoveryTick = 0
+        diagnostics.log("RECOVERY_START max=$MAX_RECOVERY_TICKS interval=$RECOVERY_INTERVAL_MS")
+        mainHandler.post(recoveryRunnable)
+    }
+
+    private fun stopRecoveryCycle() {
+        mainHandler.removeCallbacks(recoveryRunnable)
+    }
+
+    private fun onRecoveryTick() {
+        val ready = scanReadiness() == null
+        scope.launch {
+            val online = channelManager.channelSlots().values.map { it.uppercase() }.toSet()
+            val pending = channelManager.pendingMacs().map { it.uppercase() }.toSet()
+            val recent = runCatching {
+                deviceConfig.recentDevices(ChannelPalette.MAX_CHANNELS).map { it.mac }
+            }.getOrElse { error ->
+                diagnostics.log("RECOVERY_KNOWN_FAIL ${error.javaClass.simpleName}")
+                emptyList()
+            }
+            val targets = recoveryTargets(recent, online, pending, ChannelPalette.MAX_CHANNELS)
+            val decision = recoveryDecision(recoveryTick, targets.size, settings.autoConnect, ready)
+            if (decision != RecoveryDecision.CONTINUE) {
+                diagnostics.log("RECOVERY_STOP $decision tick=$recoveryTick")
+                if (decision == RecoveryDecision.STOP_BUDGET && eventThrottle.allow("recovery_stop")) {
+                    uiEvent("自动补连已暂停：连续 $MAX_RECOVERY_TICKS 轮未连上，请检查卡尺电量后点连接页重连")
+                }
+                return@launch
+            }
+            diagnostics.log("RECOVERY_TICK ${recoveryTick + 1}/$MAX_RECOVERY_TICKS targets=${targets.size}")
+            mainHandler.post { targets.forEach { channelManager.requestConnect(it) } }
+            recoveryTick++
+            mainHandler.postDelayed(recoveryRunnable, RECOVERY_INTERVAL_MS)
+        }
+    }
+
     /** 返回无法扫描的原因，null 表示可扫描。 */
     fun scanReadiness(): String? {
         if (Build.VERSION.SDK_INT >= 31) {
@@ -255,9 +420,28 @@ class AppContainer(context: Context) {
         }
     }
 
+    private val bluetoothReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context, intent: Intent) {
+            if (intent.action == BluetoothAdapter.ACTION_STATE_CHANGED) {
+                val current = intent.getIntExtra(BluetoothAdapter.EXTRA_STATE, -1)
+                val previous = bluetoothState
+                bluetoothState = current
+                onBluetoothStateChanged(previous, current)
+            } else {
+                diagnostics.log("BT_BROADCAST_SKIP ${intent.action.orEmpty()}")
+            }
+        }
+    }
+
+    private val recoveryRunnable = object : Runnable {
+        override fun run() = onRecoveryTick()
+    }
+
     init {
         batchUseCase.ensureDefault(settings.activeBatchId)
         mainHandler.post(idleRunnable)
+        refreshKnownMacs()
+        registerBluetoothWatcher()
     }
 
     fun measurements() = database.measurementDao().observeAll()
@@ -326,11 +510,17 @@ class AppContainer(context: Context) {
         if (!shouldBeep(overLimit, settings.overLimitBeep, now - lastBeepAt, BEEP_COOLDOWN_MS)) return
         lastBeepAt = now
         overLimitBeep.play()
+        if (eventThrottle.allow("over_limit_alert")) {
+            mainHandler.post { uiEvent(overLimitAlertMessage()) }
+        }
     }
 
     fun close() {
         mainHandler.removeCallbacks(idleRunnable)
+        stopRecoveryCycle()
         cancelAllReconnects()
+        runCatching { appContext.unregisterReceiver(bluetoothReceiver) }
+            .onFailure { error -> diagnostics.log("BT_WATCHER_UNREG_FAIL ${error.javaClass.simpleName}") }
         eventThrottle.clear()
         channelManager.close()
         capture.close()
@@ -341,6 +531,7 @@ class AppContainer(context: Context) {
         when (event) {
             is ChannelEvent.Connected -> {
                 resetReconnect(event.mac)
+                knownMacs = knownMacs + event.mac.trim().uppercase()
                 settings.lastMac = event.mac
                 deviceConfig.registerConnected(event.mac, "GL-BLE#${event.mac.takeLast(4)}", event.channelNo)
                 uiEvent("CH${event.channelNo} 已连接 ${event.mac}")

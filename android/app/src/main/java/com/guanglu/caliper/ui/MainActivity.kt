@@ -5,23 +5,37 @@ import android.content.ActivityNotFoundException
 import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.Color
+import android.graphics.drawable.GradientDrawable
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.provider.Settings
+import android.text.TextUtils
 import android.view.Gravity
 import android.view.View
 import android.view.WindowManager
 import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.TextView
-import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import com.guanglu.caliper.AppContainer
 import com.guanglu.caliper.CaliperApp
+import com.guanglu.caliper.core.model.BUBBLE_BOTTOM_MARGIN_DP
+import com.guanglu.caliper.core.model.BUBBLE_CORNER_RADIUS_DP
+import com.guanglu.caliper.core.model.BUBBLE_MAX_LINES
+import com.guanglu.caliper.core.model.BUBBLE_PADDING_H_DP
+import com.guanglu.caliper.core.model.BUBBLE_PADDING_V_DP
+import com.guanglu.caliper.core.model.BUBBLE_SIDE_MARGIN_DP
+import com.guanglu.caliper.core.model.BUBBLE_TEXT_SIZE_SP
 import com.guanglu.caliper.core.model.activityLaunchFailureMessage
+import com.guanglu.caliper.core.model.bubbleDurationMs
+import com.guanglu.caliper.core.model.bubbleFill
+import com.guanglu.caliper.core.model.bubbleMaxWidthPx
+import com.guanglu.caliper.core.model.bubbleToneOf
 import com.guanglu.caliper.core.model.safResultMessage
 import com.guanglu.caliper.ui.pages.Pages
 import com.guanglu.caliper.ui.pages.UiActions
@@ -45,6 +59,9 @@ class MainActivity : ComponentActivity(), UiActions {
     private var pendingChannel: Int? = null
     private var pendingBitmap: Bitmap? = null
     private var currentPage = "P2"
+    private lateinit var bubbleHost: FrameLayout
+    private val bubbleHandler = Handler(Looper.getMainLooper())
+    private var bubbleDismiss: Runnable? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -114,9 +131,24 @@ class MainActivity : ComponentActivity(), UiActions {
             LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(Web.TABBAR_H))
         )
         setContentView(root)
-
+        setupBubbleHost()
         setPage(currentPage)
         requestBlePermissions()
+    }
+
+    /** 气泡浮层挂在页面之上但不拦截触摸。 */
+    private fun setupBubbleHost() {
+        bubbleHost = FrameLayout(this).apply {
+            isClickable = false
+            isFocusable = false
+        }
+        addContentView(
+            bubbleHost,
+            FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                FrameLayout.LayoutParams.MATCH_PARENT
+            )
+        )
     }
 
     override fun onStart() {
@@ -128,6 +160,9 @@ class MainActivity : ComponentActivity(), UiActions {
         (content.getChildAt(0)?.tag as? Job)?.cancel()
         container.uiEvent = {}
         pendingBitmap = null
+        bubbleDismiss?.let { bubbleHandler.removeCallbacks(it) }
+        bubbleDismiss = null
+        if (::bubbleHost.isInitialized) bubbleHost.removeAllViews()
         super.onDestroy()
     }
 
@@ -148,8 +183,45 @@ class MainActivity : ComponentActivity(), UiActions {
         }
     }
 
+    /** 轻量气泡：替换上一条消息，短停留、字号放大但宽度封顶，不拦截页面点击。 */
     override fun toast(message: String) {
-        Toast.makeText(this, message, Toast.LENGTH_SHORT).show()
+        bubbleDismiss?.let { bubbleHandler.removeCallbacks(it) }
+        bubbleHost.removeAllViews()
+        val tone = bubbleToneOf(message)
+        val bubble = TextView(this).apply {
+            text = message
+            setTextColor(Color.WHITE)
+            textSize = BUBBLE_TEXT_SIZE_SP
+            gravity = Gravity.CENTER
+            maxLines = BUBBLE_MAX_LINES
+            ellipsize = TextUtils.TruncateAt.END
+            maxWidth = bubbleMaxWidthPx(
+                resources.displayMetrics.widthPixels, dp(BUBBLE_SIDE_MARGIN_DP)
+            )
+            setPadding(
+                dp(BUBBLE_PADDING_H_DP), dp(BUBBLE_PADDING_V_DP),
+                dp(BUBBLE_PADDING_H_DP), dp(BUBBLE_PADDING_V_DP)
+            )
+            background = GradientDrawable().apply {
+                setColor(bubbleFill(tone))
+                cornerRadius = dp(BUBBLE_CORNER_RADIUS_DP).toFloat()
+            }
+            isClickable = false
+            isFocusable = false
+        }
+        val params = FrameLayout.LayoutParams(
+            FrameLayout.LayoutParams.WRAP_CONTENT,
+            FrameLayout.LayoutParams.WRAP_CONTENT,
+            Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL
+        ).apply {
+            bottomMargin = dp(BUBBLE_BOTTOM_MARGIN_DP)
+            leftMargin = dp(BUBBLE_SIDE_MARGIN_DP)
+            rightMargin = dp(BUBBLE_SIDE_MARGIN_DP)
+        }
+        bubbleHost.addView(bubble, params)
+        val dismiss = Runnable { bubbleHost.removeAllViews() }
+        bubbleDismiss = dismiss
+        bubbleHandler.postDelayed(dismiss, bubbleDurationMs(message.length))
     }
 
     override fun exportCsv(channelNo: Int?) {

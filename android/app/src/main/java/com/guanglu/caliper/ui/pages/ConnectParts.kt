@@ -174,6 +174,7 @@ internal class ScanSession(
             handler.post {
                 registry.add(device)
                 rebuild()
+                c.autoConnectScanned(device.mac)
                 hint.text = "发现 ${registry.size} 台卡尺，点设备名连接" +
                     dedupSuffix(c.scanDedupCount() + registry.mergedCount)
             }

@@ -122,7 +122,7 @@ private fun settingsMeasureCard(
     val lower = context.webEdit(c.settings.lowerLimitUm10?.let { Units.formatMm(it) } ?: "")
     val upper = context.webEdit(c.settings.upperLimitUm10?.let { Units.formatMm(it) } ?: "")
     card.addView(webField("小数位数（0–4）", "显示与导出统一，默认 4 位不四舍五入", decimals))
-    card.addView(webField("公差下限 (mm)", "设置上下公差后才会判定超差；超差数值变红并蜂鸣，未设为「未判定」", lower))
+    card.addView(webField("公差下限 (mm)", "设置上下公差后才会判定超差；超差数值变红并三连蜂鸣 + 振动，未设为「未判定」", lower))
     card.addView(webField("公差上限 (mm)", "", upper))
     val save: (Boolean) -> Boolean = { notify ->
         val parsed = parseDecimals(decimals.text.toString())
@@ -168,9 +168,9 @@ internal fun settingsPage(context: Context, c: AppContainer, actions: UiActions)
     val autoSwitch = webSwitch(c.settings.autoConnect)
     autoSwitch.setOnCheckedChangeListener { _, checked ->
         c.settings.autoConnect = checked
-        actions.toast(if (checked) "已开启自动重连：下次启动自动连接" else "已关闭自动重连")
+        actions.toast(if (checked) "已开启自动重连：启动或蓝牙恢复时自动补连" else "已关闭自动重连")
     }
-    behavior.addView(webField("自动重连上次设备", "启动时自动连接上次连接过的卡尺", autoSwitch))
+    behavior.addView(webField("自动重连上次设备", "启动、蓝牙恢复或重新广播时自动连接已登记的卡尺", autoSwitch))
     behavior.addView(overLimitBeepField(context, c, actions))
     val idleMinutes = context.webEdit(c.settings.idleDisconnectMinutes.toString())
     behavior.addView(webField("空闲自动断连（分钟）", "0 = 不断开；超时无数据由 App 断开通道，不下发设备参数", idleMinutes))
