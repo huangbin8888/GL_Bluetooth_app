@@ -17,6 +17,12 @@ object CsvCodec {
         "CHANNEL", "NOTE"
     )
 
+    /** 导出文件的中文表头；只保留用户指定的 7 列，不含批次号与英文标记。 */
+    val EXPORT_HEADERS = listOf("日期", "时间", "设备名称", "测量值", "公差上限", "公差下限", "通道名称")
+
+    /** 与 EXPORT_HEADERS 逐项对应的内部键，保证导出的 CSV 可重新导入。 */
+    val EXPORT_KEYS = listOf("DATE", "TIME", "DEVICE_MAC", "VALUE_MM", "UPPER_TOL", "LOWER_TOL", "CHANNEL")
+
     private val ALIASES: Map<String, List<String>> = mapOf(
         "DATE" to listOf("日期", "检验日期", "检测日期"),
         "TIME" to listOf("时间", "检验时间"),
@@ -26,13 +32,13 @@ object CsvCodec {
         "NOMINAL" to listOf("公称值", "规格", "检验标准", "标准值"),
         "LOWER_TOL" to listOf("下偏差", "公差下限"),
         "UPPER_TOL" to listOf("上偏差", "公差上限"),
-        "VALUE_MM" to listOf("实测值", "测量值", "读数"),
+        "VALUE_MM" to listOf("实测值", "测量值", "测量出的值", "读数"),
         "RAW_VALUE" to listOf("原始值"),
         "RAW_UNIT" to listOf("单位"),
         "VERDICT" to listOf("判定", "结论"),
         "SOURCE" to listOf("来源", "数据来源"),
-        "DEVICE_MAC" to listOf("设备MAC", "卡尺编号"),
-        "CHANNEL" to listOf("通道"),
+        "DEVICE_MAC" to listOf("设备名称", "设备MAC", "卡尺编号"),
+        "CHANNEL" to listOf("通道名称", "通道"),
         "NOTE" to listOf("备注", "说明")
     )
 
@@ -93,18 +99,20 @@ object CsvCodec {
         return ParseResult(headers, rows, skipped, parseErrors, bomRemoved)
     }
 
-    /** 返回通道号与历史通道标记，CH8–CH10 保留原值。 */
+    /** 返回通道号与历史通道标记，兼容中文「通道1」与 CH8–CH10 原值。 */
     fun channelOf(raw: String): Pair<Int, Boolean> {
         val value = raw.trim().uppercase()
-        val number = value.removePrefix("CH").toIntOrNull() ?: return 0 to true
+        val digits = value.removePrefix("CH").removePrefix("通道").trim()
+        val number = digits.toIntOrNull() ?: return 0 to true
         return if (number in 1..ChannelPalette.MAX_CHANNELS) number to false else number to true
     }
 
+    /** 写出中文表头的 7 列 CSV；rows 仍以内部键索引。 */
     fun export(rows: List<Map<String, String>>): String {
         val sb = StringBuilder()
-        sb.append(COLUMNS.joinToString(",")).append("\r\n")
+        sb.append(EXPORT_HEADERS.joinToString(",")).append("\r\n")
         rows.forEach { row ->
-            sb.append(COLUMNS.joinToString(",") { escape(row[it].orEmpty()) }).append("\r\n")
+            sb.append(EXPORT_KEYS.joinToString(",") { escape(row[it].orEmpty()) }).append("\r\n")
         }
         return sb.toString()
     }

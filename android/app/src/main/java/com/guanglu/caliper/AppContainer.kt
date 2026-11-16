@@ -107,7 +107,7 @@ class AppContainer(context: Context) {
 
     val deviceConfig = DeviceConfigUseCase(database.deviceDao())
     val hid = HidKeyboardInputUseCase(capture, settings) { diagnostics.log(it) }
-    val io = ImportExportUseCases(context, database.measurementDao(), settings)
+    val io = ImportExportUseCases(context, database.measurementDao(), database.deviceDao(), settings)
 
     private val batchUseCase = BatchUseCase(database.batchDao())
 
@@ -194,9 +194,6 @@ class AppContainer(context: Context) {
             targets.forEach { channelManager.requestConnect(it.mac) }
             if (targets.isNotEmpty()) {
                 diagnostics.log("AUTO_CONNECT ${targets.size} ${targets.joinToString { it.mac }}")
-                if (eventThrottle.allow("auto_connect")) {
-                    uiEvent("自动连接上次的 ${targets.size} 台卡尺…")
-                }
             }
         }
         return null
@@ -229,8 +226,7 @@ class AppContainer(context: Context) {
                 }
             }
             if (stopped) {
-                diagnostics.log("AUTO_RECONNECT_STOP $mac attempts=$attempts")
-                uiEvent("已停止重连 ${mac.takeLast(4)}：连续 $attempts 次失败，请检查卡尺电量与蓝牙后手动连接")
+                diagnostics.log("AUTO_RECONNECT_STOP $mac attempts=$attempts reason=连续失败，需手动连接")
             }
         }
     }
@@ -307,9 +303,7 @@ class AppContainer(context: Context) {
             diagnostics.log("SCAN_AUTO_CONNECT $key")
             mainHandler.post {
                 channelManager.requestConnect(key)
-                if (eventThrottle.allow("scan_auto:$key")) {
-                    uiEvent("已重新发现 ${key.takeLast(4)}，正在自动连接…")
-                }
+                diagnostics.log("SCAN_AUTO_CONNECT_SILENT $key")
             }
         }
     }
@@ -335,15 +329,11 @@ class AppContainer(context: Context) {
                 }
                 lastAutoConnectMs = 0L
                 startRecoveryCycle()
-                if (eventThrottle.allow("bt_recover")) {
-                    uiEvent("蓝牙已恢复，正在重连已登记的卡尺…")
-                }
+                diagnostics.log("BT_RECOVER_SILENT")
             }
             BluetoothRecoveryAction.SUSPEND -> {
                 stopRecoveryCycle()
-                if (eventThrottle.allow("bt_off")) {
-                    uiEvent("系统蓝牙已关闭，重新打开后会自动重连已登记的卡尺")
-                }
+                diagnostics.log("BT_OFF_SILENT")
             }
             BluetoothRecoveryAction.NONE -> Unit
         }
@@ -375,10 +365,7 @@ class AppContainer(context: Context) {
             val targets = recoveryTargets(recent, online, pending, ChannelPalette.MAX_CHANNELS)
             val decision = recoveryDecision(recoveryTick, targets.size, settings.autoConnect, ready)
             if (decision != RecoveryDecision.CONTINUE) {
-                diagnostics.log("RECOVERY_STOP $decision tick=$recoveryTick")
-                if (decision == RecoveryDecision.STOP_BUDGET && eventThrottle.allow("recovery_stop")) {
-                    uiEvent("自动补连已暂停：连续 $MAX_RECOVERY_TICKS 轮未连上，请检查卡尺电量后点连接页重连")
-                }
+                diagnostics.log("RECOVERY_STOP $decision tick=$recoveryTick reason=后台补连结束")
                 return@launch
             }
             diagnostics.log("RECOVERY_TICK ${recoveryTick + 1}/$MAX_RECOVERY_TICKS targets=${targets.size}")
@@ -437,7 +424,7 @@ class AppContainer(context: Context) {
 
     private val idleRunnable = object : Runnable {
         override fun run() {
-            val idleMs = settings.idleDisconnectMinutes * 60_000L
+            val idleMs = if (settings.autoDisconnectEnabled) settings.idleDisconnectMinutes * 60_000L else null
             channelManager.pollIdle(System.currentTimeMillis(), idleMs)
             mainHandler.postDelayed(this, IDLE_POLL_INTERVAL_MS)
         }
@@ -499,6 +486,15 @@ class AppContainer(context: Context) {
             runCatching { io.exportCsv(uri, channelNo) }
                 .onSuccess { report -> uiEvent("已导出 ${report.rows} 行 CSV") }
                 .onFailure { error -> reportIoFailure("CSV 导出", error) }
+        }
+    }
+
+    /** 导出中文 7 列 xlsx；超差测量值使用红色字体。 */
+    fun exportColoredSheet(uri: Uri) {
+        scope.launch {
+            runCatching { io.exportColoredXlsx(uri) }
+                .onSuccess { report -> uiEvent("已导出 ${report.rows} 行彩色表格，超差数值已标红") }
+                .onFailure { error -> reportIoFailure("彩色表格导出", error) }
         }
     }
 

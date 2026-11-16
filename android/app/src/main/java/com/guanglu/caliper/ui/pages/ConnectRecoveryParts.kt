@@ -37,7 +37,7 @@ internal fun renderKnownDevices(
         if (result.isFailure) {
             val reason = result.exceptionOrNull()?.javaClass?.simpleName ?: "数据库异常"
             hint.text = "读取已登记卡尺失败：$reason"
-            actions.toast("读取已登记卡尺失败：$reason，请重试")
+            c.diagnostics.log("KNOWN_DEVICE_LOAD_FAIL $reason")
             return@launch
         }
         val devices = result.getOrThrow()

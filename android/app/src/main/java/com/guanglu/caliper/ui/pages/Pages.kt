@@ -36,6 +36,7 @@ interface UiActions {
     fun toast(message: String)
     fun setPage(pageId: String)
     fun exportCsv(channelNo: Int? = null)
+    fun exportColoredSheet()
     fun importCsv()
     fun exportDiagnostics()
     fun exportPng(bitmap: Bitmap)
@@ -213,7 +214,7 @@ object Pages {
             session.start()
             renderKnownDevices(context, c, actions, knownHint, knownList)
             refreshConnect(c, state, slotLabels)
-            actions.toast("蓝牙已恢复，正在重新扫描并自动重连已登记的卡尺")
+            c.diagnostics.log("BT_UI_RECOVER_SILENT")
         }
         col.addView(webBtnRow(
             webButton("扫描设备", primary = true) {
@@ -587,7 +588,7 @@ object Pages {
     private fun templates(context: Context, c: AppContainer, actions: UiActions): View = context.run {
         val page = screen(context)
         val col = page.col()
-        col.addView(webBanner("V1 支持 CSV 表头模板；自定义 xlsx 模板（合并单元格、公式、样式）延到 V2。", WebTone.BLUE))
+        col.addView(webBanner("V1 支持 CSV 表头模板与中文 7 列导出；自定义 xlsx 模板（合并单元格、公式）延到 V2。", WebTone.BLUE))
         col.addView(webSection("模板列表"))
         val builtIn = webCard(true)
         val row1 = LinearLayout(context).apply { orientation = LinearLayout.HORIZONTAL }
@@ -630,7 +631,8 @@ object Pages {
         ).forEach { cells -> tableCard.addView(devRow(context, *cells)) }
         col.addView(tableCard)
         col.addView(webBanner(
-            "识别 15 列 · 中文别名命中 6 列 · 未识别列跳过并记入导入报告 · 首列剥离 BOM。\n导出的 CSV 增加 CHANNEL 列。",
+            "识别 15 列 · 中文别名命中 6 列 · 未识别列跳过并记入导入报告 · 首列剥离 BOM。\n" +
+                "导出的 CSV 为中文 7 列；超差数值标红请用「导出到本地」页的彩色表格。",
             WebTone.WARN
         ))
         col.addView(webBtnRow(

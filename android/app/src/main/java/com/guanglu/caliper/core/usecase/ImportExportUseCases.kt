@@ -3,11 +3,15 @@ package com.guanglu.caliper.core.usecase
 import android.content.Context
 import android.graphics.Bitmap
 import android.net.Uri
+import com.guanglu.caliper.core.database.dao.DeviceDao
 import com.guanglu.caliper.core.database.dao.MeasurementDao
 import com.guanglu.caliper.core.database.entity.Measurement
 import com.guanglu.caliper.core.datastore.SettingsRepository
-import com.guanglu.caliper.core.model.ChannelPalette
 import com.guanglu.caliper.core.model.Units
+import com.guanglu.caliper.core.model.channelDisplayName
+import com.guanglu.caliper.core.model.deviceDisplayName
+import com.guanglu.caliper.core.model.exportValueHighlighted
+import com.guanglu.caliper.core.model.measurementDeviceName
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.time.DateTimeException
@@ -28,24 +32,35 @@ data class ImportReport(
     val fatal: String? = null
 )
 
+private data class ExportData(
+    val csvRows: List<Map<String, String>>,
+    val sheetRows: List<SheetRow>
+)
+
 /**
- * 通过 SAF 完成 CSV 与 PNG 导入导出。
+ * 通过 SAF 完成 CSV、彩色表格与 PNG 导入导出。
  *
  * @author AI-Generated
  */
 class ImportExportUseCases(
     private val context: Context,
     private val dao: MeasurementDao,
+    private val deviceDao: DeviceDao,
     private val settings: SettingsRepository
 ) {
     suspend fun exportCsv(uri: Uri, channelNo: Int? = null): ExportReport = withContext(Dispatchers.IO) {
-        val all = dao.all()
-        val selected = if (channelNo == null) all else all.filter { it.channelNo == channelNo }
-        val rows = selected.map { toRow(it) }
-        val bytes = (CsvCodec.BOM + CsvCodec.export(rows)).toByteArray(Charsets.UTF_8)
-        context.contentResolver.openOutputStream(uri)?.use { it.write(bytes) }
-            ?: error("无法打开 SAF 输出流")
-        ExportReport(rows.size, bytes.size)
+        val data = buildExportData(channelNo)
+        val bytes = (CsvCodec.BOM + CsvCodec.export(data.csvRows)).toByteArray(Charsets.UTF_8)
+        writeBytes(uri, bytes)
+        ExportReport(data.csvRows.size, bytes.size)
+    }
+
+    /** 导出中文 7 列 xlsx，超差测量值使用红色字体。 */
+    suspend fun exportColoredXlsx(uri: Uri, channelNo: Int? = null): ExportReport = withContext(Dispatchers.IO) {
+        val data = buildExportData(channelNo)
+        val bytes = ColoredSheetCodec.build(CsvCodec.EXPORT_HEADERS, data.sheetRows)
+        writeBytes(uri, bytes)
+        ExportReport(data.sheetRows.size, bytes.size)
     }
 
     suspend fun importCsv(uri: Uri): ImportReport = withContext(Dispatchers.IO) {
@@ -117,28 +132,54 @@ class ImportExportUseCases(
         } ?: false
     }
 
-    private fun toRow(item: Measurement): Map<String, String> {
-        val (date, time) = formatDateTime(item.capturedAt)
-        // 历史通道按 CH8–CH10 原值写回。
-        val channel = "CH${item.channelNo}"
-        return mapOf(
-            "DATE" to date,
-            "TIME" to time,
-            "SEQ" to item.seq.toString(),
-            "BATCH" to item.batchId.toString(),
-            "ITEM" to "",
-            "NOMINAL" to "",
-            "LOWER_TOL" to "",
-            "UPPER_TOL" to "",
-            "VALUE_MM" to Units.formatMm(item.valueUm10, settings.decimals),
-            "RAW_VALUE" to item.rawValue,
-            "RAW_UNIT" to item.rawUnit,
-            "VERDICT" to item.verdict,
-            "SOURCE" to item.source,
-            "DEVICE_MAC" to item.deviceMac,
-            "CHANNEL" to channel,
-            "NOTE" to item.note
-        )
+    /** CSV 与彩色表格共用同一份 7 列数据。 */
+    private suspend fun buildExportData(channelNo: Int?): ExportData {
+        val all = dao.all()
+        val selected = if (channelNo == null) all else all.filter { it.channelNo == channelNo }
+        val names = runCatching {
+            deviceDao.all().associate { device ->
+                device.mac to deviceDisplayName(device.name, device.customName, device.mac)
+            }
+        }.getOrDefault(emptyMap())
+        val lower = settings.lowerLimitUm10?.let { Units.formatMm(it, settings.decimals) }.orEmpty()
+        val upper = settings.upperLimitUm10?.let { Units.formatMm(it, settings.decimals) }.orEmpty()
+        val csvRows = mutableListOf<Map<String, String>>()
+        val sheetRows = mutableListOf<SheetRow>()
+        selected.forEach { item ->
+            val (date, time) = formatDateTime(item.capturedAt)
+            val value = Units.formatMm(item.valueUm10, settings.decimals)
+            val device = measurementDeviceName(names, item.deviceMac)
+            val channel = channelDisplayName(item.channelNo)
+            val highlighted = exportValueHighlighted(
+                item.verdict, item.valueUm10, settings.lowerLimitUm10, settings.upperLimitUm10
+            )
+            csvRows += mapOf(
+                "DATE" to date,
+                "TIME" to time,
+                "DEVICE_MAC" to device,
+                "VALUE_MM" to value,
+                "UPPER_TOL" to upper,
+                "LOWER_TOL" to lower,
+                "CHANNEL" to channel
+            )
+            sheetRows += SheetRow(
+                listOf(
+                    SheetCell(date),
+                    SheetCell(time),
+                    SheetCell(device),
+                    SheetCell(value, numeric = true, highlighted = highlighted),
+                    SheetCell(upper, numeric = upper.isNotEmpty()),
+                    SheetCell(lower, numeric = lower.isNotEmpty()),
+                    SheetCell(channel)
+                )
+            )
+        }
+        return ExportData(csvRows, sheetRows)
+    }
+
+    private fun writeBytes(uri: Uri, bytes: ByteArray) {
+        context.contentResolver.openOutputStream(uri)?.use { it.write(bytes) }
+            ?: error("无法打开 SAF 输出流")
     }
 
     private fun formatDateTime(epochMs: Long): Pair<String, String> {

@@ -36,8 +36,8 @@ class ButtonContractTest {
     )
 
     private val observableActions = listOf(
-        "actions.toast", "actions.setPage", "actions.exportCsv", "actions.importCsv",
-        "actions.exportDiagnostics", "actions.exportPng", "actions.openSystemSettings",
+        "actions.toast", "actions.setPage", "actions.exportCsv", "actions.exportColoredSheet",
+        "actions.importCsv", "actions.exportDiagnostics", "actions.exportPng", "actions.openSystemSettings",
         "c.", "session.", "send(", "save(", "saveIdle(", "renderTarget()", "renderChips()",
         "renderTable()", "hidInput.setText", "confirm.tap", "chart.", "onConnected()",
         "nameInput.setText", "refreshChannels()"
@@ -462,9 +462,80 @@ class ButtonContractTest {
         assertTrue("断连未清理查询", manager.contains("clearNameQuery(mac)"))
     }
 
+    @Test
+    fun csvExportUsesChineseHeadersWithToleranceValuesAndDeviceName() {
+        val codec = read("core/usecase/CsvCodec.kt")
+        val expectedHeaders = "val EXPORT_HEADERS = listOf(\"日期\", \"时间\", \"设备名称\", " +
+            "\"测量值\", \"公差上限\", \"公差下限\", \"通道名称\")"
+        assertTrue("导出表头不是中文 7 列", codec.contains(expectedHeaders))
+        assertTrue("导出未按内部键取 7 列", codec.contains("EXPORT_KEYS.joinToString"))
+        assertFalse("导出仍写 16 列英文表头", codec.contains("sb.append(COLUMNS.joinToString"))
+        val exporter = read("core/usecase/ImportExportUseCases.kt")
+        assertTrue("公差上限未写入", exporter.contains("\"UPPER_TOL\" to upper"))
+        assertTrue("公差下限未写入", exporter.contains("\"LOWER_TOL\" to lower"))
+        assertTrue("设备名称未写入", exporter.contains("\"DEVICE_MAC\" to device"))
+        assertTrue("通道名称未写入", exporter.contains("\"CHANNEL\" to channel"))
+        assertTrue("通道名称未用中文", exporter.contains("channelDisplayName(item.channelNo)"))
+        assertTrue("设备名称未用登记名", exporter.contains("measurementDeviceName(names, item.deviceMac)"))
+        assertFalse("导出仍写批次号", exporter.contains("\"BATCH\" to"))
+        assertFalse("导出仍写英文通道前缀", exporter.contains("val channel = \"CH"))
+    }
+
+    @Test
+    fun coloredSheetExportIsWiredAndMarksOverLimitValuesRed() {
+        val page = read("ui/pages/ExportSettingsPages.kt")
+        assertTrue("缺少彩色表格导出按钮", page.contains("webButton(\"导出彩色表格（超差标红）\""))
+        assertTrue("按钮未调用导出动作", page.contains("actions.exportColoredSheet()"))
+        assertTrue("未说明 CSV 不含颜色", page.contains("CSV 是纯文本、不含颜色"))
+        assertTrue("动作接口未声明", read("ui/pages/Pages.kt").contains("fun exportColoredSheet()"))
+        val activity = read("ui/MainActivity.kt")
+        assertTrue("彩色表格未接 SAF 回调", activity.contains("REQ_EXPORT_SHEET -> container.exportColoredSheet(uri)"))
+        assertTrue("彩色表格 MIME 未声明", activity.contains("ColoredSheetCodec.MIME"))
+        assertTrue("门面未调用导出", read("AppContainer.kt").contains("io.exportColoredXlsx(uri)"))
+        val codec = read("core/usecase/ColoredSheetCodec.kt")
+        assertTrue("未定义红色字体", codec.contains("FFFF0000"))
+        assertTrue("未定义红色样式索引", codec.contains("RED_STYLE_INDEX"))
+        val exporter = read("core/usecase/ImportExportUseCases.kt")
+        assertTrue("超差标记未传入单元格", exporter.contains("highlighted = highlighted"))
+        assertTrue("未接入超差判定策略", exporter.contains("exportValueHighlighted("))
+    }
+
+    @Test
+    fun scanWithoutDevicesShowsExactMessageAndAutoReconnectStaysSilent() {
+        val parts = read("ui/pages/ConnectParts.kt")
+        assertTrue("扫描空结果提示文案不符", parts.contains("actions.toast(\"没有搜寻到设备！\")"))
+        assertFalse("仍使用旧的未发现卡尺提示", parts.contains("未发现卡尺，请查看连接页提示"))
+        val container = read("AppContainer.kt")
+        assertFalse("自动补连仍弹提示", container.contains("uiEvent(\"自动连接上次的"))
+        assertFalse("重连失败仍弹提示", container.contains("uiEvent(\"已停止重连"))
+        assertFalse("蓝牙恢复仍弹提示", container.contains("uiEvent(\"蓝牙已恢复，正在重连已登记"))
+        assertFalse("补连预算耗尽仍弹提示", container.contains("uiEvent(\"自动补连已暂停"))
+        assertTrue("后台补连未留诊断", container.contains("RECOVERY_STOP"))
+        val activity = read("ui/MainActivity.kt")
+        assertFalse("启动补连仍弹提示", activity.contains("autoConnectKnown()?.let { toast(it) }"))
+        assertTrue("启动补连未写后台诊断", activity.contains("AUTO_CONNECT_SKIP"))
+        val pages = read("ui/pages/Pages.kt")
+        assertFalse("页面蓝牙恢复仍弹提示", pages.contains("actions.toast(\"蓝牙已恢复，正在重新扫描"))
+    }
+
+    @Test
+    fun autoDisconnectDefaultsOffAndIsConfigurableInSettings() {
+        val settings = read("core/datastore/SettingsRepository.kt")
+        assertTrue("开关默认值不是关闭", settings.contains("sp.getBoolean(\"auto_disconnect_enabled\", false)"))
+        val container = read("AppContainer.kt")
+        assertTrue(
+            "空闲轮询未受开关控制",
+            container.contains("if (settings.autoDisconnectEnabled) settings.idleDisconnectMinutes * 60_000L else null")
+        )
+        val page = read("ui/pages/ExportSettingsPages.kt")
+        assertTrue("设置页缺少开关", page.contains("webSwitch(c.settings.autoDisconnectEnabled)"))
+        assertTrue("恢复默认未关闭开关", page.contains("c.settings.autoDisconnectEnabled = false"))
+        assertTrue("设置页未说明默认关闭", page.contains("默认关闭"))
+    }
+
     private companion object {
         const val SOURCE_PATH = "src/main/java/com/guanglu/caliper"
-        const val EXPECTED_BUTTON_SITES = 40
+        const val EXPECTED_BUTTON_SITES = 41
         val BUTTON_PATTERN = Regex("webButton\\(\\s*\"([^\"]+)\"")
         val SWITCH_PATTERN = Regex("setOnCheckedChangeListener")
         val BUTTON_FILES = listOf(

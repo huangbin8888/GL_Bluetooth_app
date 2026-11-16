@@ -59,6 +59,11 @@ class SettingsRepository(context: Context) {
         get() = sp.getBoolean("over_limit_beep", true)
         set(value) = sp.edit().putBoolean("over_limit_beep", value).apply()
 
+    /** 空闲自动断连总开关；默认关闭，App 不主动断开卡尺。 */
+    var autoDisconnectEnabled: Boolean
+        get() = sp.getBoolean("auto_disconnect_enabled", false)
+        set(value) = sp.edit().putBoolean("auto_disconnect_enabled", value).apply()
+
     /** 空闲自动断连分钟数；0 表示不断开。 */
     var idleDisconnectMinutes: Int
         get() = sp.getInt("idle_disconnect_minutes", 0)

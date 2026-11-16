@@ -67,7 +67,9 @@ internal fun exportPage(context: Context, c: AppContainer, actions: UiActions): 
     col.addView(webFileLine("B20261112-01_ALL.csv"))
     col.addView(webFileLine("B20261112-01_ALL.png"))
     col.addView(webBanner(
-        "保存到手机「下载 / Documents」，走系统文件选择器 SAF；不申请宽泛存储权限。\nCSV 为 UTF-8 BOM，可重新导入；同名文件不覆盖。",
+        "保存到手机「下载 / Documents」，走系统文件选择器 SAF；不申请宽泛存储权限。\n" +
+            "CSV 为 UTF-8 BOM 中文 7 列，可重新导入；同名文件不覆盖。\n" +
+            "CSV 是纯文本、不含颜色；超差数值标红请点「导出彩色表格」，用表格软件打开 xlsx。",
         WebTone.BLUE
     ))
     val hintLine = webTiny("")
@@ -86,6 +88,9 @@ internal fun exportPage(context: Context, c: AppContainer, actions: UiActions): 
         }
     }
     col.addView(saveButton)
+    col.addView(webBtnRow(webButton("导出彩色表格（超差标红）", small = true) {
+        actions.exportColoredSheet()
+    }))
     refreshExport = {
         val state = exportButtonState(csvChecked, pngChecked, split)
         saveButton.text = state.label
@@ -172,8 +177,25 @@ internal fun settingsPage(context: Context, c: AppContainer, actions: UiActions)
     }
     behavior.addView(webField("自动重连上次设备", "启动、蓝牙恢复或重新广播时自动连接已登记的卡尺", autoSwitch))
     behavior.addView(overLimitBeepField(context, c, actions))
+    val autoDisconnect = webSwitch(c.settings.autoDisconnectEnabled)
     val idleMinutes = context.webEdit(c.settings.idleDisconnectMinutes.toString())
-    behavior.addView(webField("空闲自动断连（分钟）", "0 = 不断开；超时无数据由 App 断开通道，不下发设备参数", idleMinutes))
+    idleMinutes.isEnabled = c.settings.autoDisconnectEnabled
+    autoDisconnect.setOnCheckedChangeListener { _, checked ->
+        c.settings.autoDisconnectEnabled = checked
+        idleMinutes.isEnabled = checked
+        actions.toast(
+            if (checked) "已开启空闲自动断连：按下方分钟数断开，分钟数为 0 仍不会断开"
+            else "已关闭空闲自动断连（默认），App 不会主动断开卡尺"
+        )
+    }
+    behavior.addView(webField(
+        "蓝牙空闲自动断连",
+        "默认关闭；开启后无数据超过设定分钟数才由 App 断开，不下发卡尺参数",
+        autoDisconnect
+    ))
+    behavior.addView(webField(
+        "空闲自动断连（分钟）", "0 = 不断开；超时无数据由 App 断开通道，不下发设备参数", idleMinutes
+    ))
     val saveIdle: (Boolean) -> Boolean = { notify ->
         val minutes = idleMinutes.text.toString().toIntOrNull()?.takeIf { it >= 0 }
         if (minutes == null) {
@@ -184,8 +206,11 @@ internal fun settingsPage(context: Context, c: AppContainer, actions: UiActions)
             c.settings.idleDisconnectMinutes = minutes
             if (notify) {
                 actions.toast(
-                    if (minutes == 0) "空闲自动断连已关闭"
-                    else "无数据 $minutes 分钟后自动断开通道"
+                    when {
+                        !c.settings.autoDisconnectEnabled -> "空闲自动断连保持关闭，默认不自动断开"
+                        minutes == 0 -> "开关已开启但分钟数为 0，实际不会断开"
+                        else -> "无数据 $minutes 分钟后自动断开通道"
+                    }
                 )
             }
             true
@@ -217,6 +242,7 @@ internal fun settingsPage(context: Context, c: AppContainer, actions: UiActions)
             c.settings.upperLimitUm10 = null
             c.settings.terminator = "CR"
             c.settings.autoConnect = true
+            c.settings.autoDisconnectEnabled = false
             c.settings.idleDisconnectMinutes = 0
             c.settings.overLimitBeep = true
             actions.toast("已恢复默认设置")

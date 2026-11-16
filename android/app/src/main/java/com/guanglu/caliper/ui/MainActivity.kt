@@ -37,6 +37,7 @@ import com.guanglu.caliper.core.model.bubbleFill
 import com.guanglu.caliper.core.model.bubbleMaxWidthPx
 import com.guanglu.caliper.core.model.bubbleToneOf
 import com.guanglu.caliper.core.model.safResultMessage
+import com.guanglu.caliper.core.usecase.ColoredSheetCodec
 import com.guanglu.caliper.ui.pages.Pages
 import com.guanglu.caliper.ui.pages.UiActions
 import kotlinx.coroutines.CoroutineScope
@@ -153,7 +154,9 @@ class MainActivity : ComponentActivity(), UiActions {
 
     override fun onStart() {
         super.onStart()
-        container.autoConnectKnown()?.let { toast(it) }
+        container.autoConnectKnown()?.let { reason ->
+            container.diagnostics.log("AUTO_CONNECT_SKIP $reason")
+        }
     }
 
     override fun onDestroy() {
@@ -229,6 +232,10 @@ class MainActivity : ComponentActivity(), UiActions {
         createDocument("text/csv", "measurements.csv", REQ_EXPORT_CSV, "CSV 导出")
     }
 
+    override fun exportColoredSheet() {
+        createDocument(ColoredSheetCodec.MIME, "measurements.xlsx", REQ_EXPORT_SHEET, "彩色表格导出")
+    }
+
     override fun importCsv() {
         val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
             addCategory(Intent.CATEGORY_OPENABLE)
@@ -277,6 +284,7 @@ class MainActivity : ComponentActivity(), UiActions {
         super.onActivityResult(requestCode, resultCode, data)
         val label = when (requestCode) {
             REQ_EXPORT_CSV -> "CSV 导出"
+            REQ_EXPORT_SHEET -> "彩色表格导出"
             REQ_IMPORT_CSV -> "CSV 导入"
             REQ_DIAGNOSTICS -> "诊断日志导出"
             REQ_EXPORT_PNG -> "图片导出"
@@ -296,6 +304,7 @@ class MainActivity : ComponentActivity(), UiActions {
         }
         when (requestCode) {
             REQ_EXPORT_CSV -> container.exportCsv(uri, pendingChannel)
+            REQ_EXPORT_SHEET -> container.exportColoredSheet(uri)
             REQ_IMPORT_CSV -> container.importCsv(uri)
             REQ_DIAGNOSTICS -> container.exportDiagnostics(uri)
             REQ_EXPORT_PNG -> {
@@ -329,6 +338,7 @@ class MainActivity : ComponentActivity(), UiActions {
         when (requestCode) {
             REQ_EXPORT_CSV -> pendingChannel = null
             REQ_EXPORT_PNG -> pendingBitmap = null
+            REQ_EXPORT_SHEET -> Unit
         }
     }
 
@@ -349,7 +359,9 @@ class MainActivity : ComponentActivity(), UiActions {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
         if (requestCode == REQ_PERMISSIONS) {
             if (grantResults.isNotEmpty() && grantResults.all { it == 0 }) {
-                container.autoConnectKnown()?.let { toast(it) }
+                container.autoConnectKnown()?.let { reason ->
+                    container.diagnostics.log("AUTO_CONNECT_SKIP $reason")
+                }
             } else {
                 toast("蓝牙权限被拒绝，可在系统设置里开启；Android 10/11 还需打开定位总开关")
             }
@@ -371,5 +383,6 @@ class MainActivity : ComponentActivity(), UiActions {
         private const val REQ_IMPORT_CSV = 2002
         private const val REQ_EXPORT_PNG = 2003
         private const val REQ_DIAGNOSTICS = 2004
+        private const val REQ_EXPORT_SHEET = 2005
     }
 }

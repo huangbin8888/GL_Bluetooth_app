@@ -2,6 +2,7 @@ package com.guanglu.caliper
 
 import com.guanglu.caliper.core.usecase.CsvCodec
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -63,14 +64,42 @@ class CsvCodecTest {
         assertEquals(0 to true, CsvCodec.channelOf(""))
     }
 
-    @Test fun export_round_trip_preserves_all_sixteen_columns() {
-        val row = CsvCodec.COLUMNS.associateWith { "x-$it" } + mapOf(
-            "DATE" to "2026-11-12", "VALUE_MM" to "155.15", "CHANNEL" to "CH7"
+    @Test fun export_uses_only_chinese_headers_and_round_trips() {
+        val row = mapOf(
+            "DATE" to "2026-11-16", "TIME" to "09:00:00", "DEVICE_MAC" to "GL-BLE#0187",
+            "VALUE_MM" to "155.1500", "UPPER_TOL" to "156.0000", "LOWER_TOL" to "154.0000",
+            "CHANNEL" to "通道3"
         )
-        val roundTrip = CsvCodec.parse(CsvCodec.export(listOf(row)))
+        val text = CsvCodec.export(listOf(row))
+        val first = text.lines().first().trim()
+        assertEquals("日期,时间,设备名称,测量值,公差上限,公差下限,通道名称", first)
+        assertFalse("表头仍有英文标记", first.contains("DATE") || first.contains("BATCH"))
+        assertFalse("表头仍含批次号", first.contains("批次"))
+        val roundTrip = CsvCodec.parse(text)
         assertNull(roundTrip.fatal)
+        assertEquals(7, roundTrip.headers.size)
         assertEquals(1, roundTrip.rows.size)
-        assertEquals("155.15", roundTrip.rows[0]["VALUE_MM"])
-        assertEquals(16, roundTrip.headers.size)
+        assertEquals("155.1500", roundTrip.rows[0]["VALUE_MM"])
+        assertEquals("156.0000", roundTrip.rows[0]["UPPER_TOL"])
+        assertEquals("154.0000", roundTrip.rows[0]["LOWER_TOL"])
+        assertEquals("GL-BLE#0187", roundTrip.rows[0]["DEVICE_MAC"])
+        assertEquals(3 to false, CsvCodec.channelOf(roundTrip.rows[0]["CHANNEL"].orEmpty()))
+        assertTrue("跳过的列不应为空", roundTrip.skippedColumns.isEmpty())
+    }
+
+    @Test fun chinese_channel_name_and_legacy_channel_are_both_parsed() {
+        assertEquals(1 to false, CsvCodec.channelOf("通道1"))
+        assertEquals(7 to false, CsvCodec.channelOf("通道 7"))
+        assertEquals(7 to false, CsvCodec.channelOf("CH7"))
+        assertEquals(10 to true, CsvCodec.channelOf("CH10"))
+    }
+
+    @Test fun chinese_headers_map_to_stable_internal_keys() {
+        assertEquals("UPPER_TOL", CsvCodec.canonical("公差上限"))
+        assertEquals("LOWER_TOL", CsvCodec.canonical("公差下限"))
+        assertEquals("DEVICE_MAC", CsvCodec.canonical("设备名称"))
+        assertEquals("VALUE_MM", CsvCodec.canonical("测量出的值"))
+        assertEquals("CHANNEL", CsvCodec.canonical("通道名称"))
+        assertEquals("BATCH", CsvCodec.canonical("批次"))
     }
 }

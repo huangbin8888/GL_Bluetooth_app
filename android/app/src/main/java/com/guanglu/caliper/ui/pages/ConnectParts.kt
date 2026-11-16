@@ -74,8 +74,8 @@ internal fun scanTimeout(
     c.stopScan()
     onDone()
     if (countProvider() == 0) {
-        hint.text = "10 秒未发现卡尺：确认卡尺已开机、长按 data 键 3 秒且液晶显示 OK；可在 P4 导出诊断日志查看 SCAN_SKIP"
-        actions.toast("未发现卡尺，请查看连接页提示")
+        hint.text = "没有搜寻到设备！确认卡尺已开机、长按 data 键 3 秒且液晶显示 OK；可在 P4 导出诊断日志查看 SCAN_SKIP"
+        actions.toast("没有搜寻到设备！")
     } else {
         hint.text = "发现 ${countProvider()} 台，点设备名连接" + dedupSuffix(dedupProvider())
     }
