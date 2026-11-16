@@ -4,13 +4,16 @@ import com.guanglu.caliper.core.model.ExportAction
 import com.guanglu.caliper.core.model.IDLE_POLL_INTERVAL_MS
 import com.guanglu.caliper.core.model.STAT_PLACEHOLDER
 import com.guanglu.caliper.core.model.acceptedSegmentIndex
+import com.guanglu.caliper.core.model.activityLaunchFailureMessage
 import com.guanglu.caliper.core.model.batchConnectMessage
 import com.guanglu.caliper.core.model.commandFeedback
 import com.guanglu.caliper.core.model.exportAction
+import com.guanglu.caliper.core.model.exportButtonState
 import com.guanglu.caliper.core.model.parseDecimals
 import com.guanglu.caliper.core.model.safResultMessage
 import com.guanglu.caliper.core.model.statisticsTexts
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -217,5 +220,62 @@ class UiActionPolicyTest {
             "当前无在线通道，请先到「连接」页连接卡尺",
             commandFeedback(0, "模式切换", sent = true, notifySent = false)
         )
+    }
+
+    @Test
+    fun exportButtonMatchesDefaultCsvAction() {
+        assertEquals("导出 CSV", exportButtonState(true, false, false).label)
+    }
+
+    @Test
+    fun exportButtonDoesNotClaimSaveWithoutAFile() {
+        listOf(
+            exportButtonState(false, true, false),
+            exportButtonState(false, false, true),
+            exportButtonState(false, false, false)
+        ).forEach { state ->
+            assertFalse("不产出文件的按钮不能叫「保存」", state.label.contains("保存"))
+            assertTrue("每个分支都要有状态说明", state.hint.isNotBlank())
+        }
+    }
+
+    @Test
+    fun exportButtonNamesGuideBranchesHonestly() {
+        assertTrue(exportButtonState(false, true, false).label.contains("说明"))
+        assertTrue(exportButtonState(false, false, true).label.contains("说明"))
+        assertTrue(exportButtonState(false, false, false).label.contains("请选择"))
+    }
+
+    @Test
+    fun csvAndPngHintPointsToAnalysisPage() {
+        assertTrue(exportButtonState(true, true, false).hint.contains("数据分析"))
+    }
+
+    @Test
+    fun everyExportCombinationHasLabelAndHint() {
+        listOf(true, false).forEach { csv ->
+            listOf(true, false).forEach { png ->
+                listOf(true, false).forEach { split ->
+                    val state = exportButtonState(csv, png, split)
+                    assertTrue(state.label.isNotBlank())
+                    assertTrue(state.hint.isNotBlank())
+                }
+            }
+        }
+    }
+
+    @Test
+    fun missingSystemAppExplainsFailure() {
+        val message = activityLaunchFailureMessage("CSV 导入")
+        assertTrue(message.contains("CSV 导入"))
+        assertTrue(message.contains("缺少"))
+        assertTrue(message.contains("操作未完成"))
+    }
+
+    @Test
+    fun missingSystemAppMessageNamesEveryEntry() {
+        listOf("CSV 导出", "CSV 导入", "诊断日志导出", "图片导出", "系统设置").forEach { label ->
+            assertTrue(activityLaunchFailureMessage(label).contains(label))
+        }
     }
 }

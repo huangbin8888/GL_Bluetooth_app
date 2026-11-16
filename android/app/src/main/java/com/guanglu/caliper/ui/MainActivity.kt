@@ -1,6 +1,7 @@
 package com.guanglu.caliper.ui
 
 import android.Manifest
+import android.content.ActivityNotFoundException
 import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.Color
@@ -20,6 +21,7 @@ import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import com.guanglu.caliper.AppContainer
 import com.guanglu.caliper.CaliperApp
+import com.guanglu.caliper.core.model.activityLaunchFailureMessage
 import com.guanglu.caliper.core.model.safResultMessage
 import com.guanglu.caliper.ui.pages.Pages
 import com.guanglu.caliper.ui.pages.UiActions
@@ -152,7 +154,7 @@ class MainActivity : ComponentActivity(), UiActions {
 
     override fun exportCsv(channelNo: Int?) {
         pendingChannel = channelNo
-        createDocument("text/csv", "measurements.csv", REQ_EXPORT_CSV)
+        createDocument("text/csv", "measurements.csv", REQ_EXPORT_CSV, "CSV 导出")
     }
 
     override fun importCsv() {
@@ -160,32 +162,43 @@ class MainActivity : ComponentActivity(), UiActions {
             addCategory(Intent.CATEGORY_OPENABLE)
             type = "*/*"
         }
-        startActivityForResult(intent, REQ_IMPORT_CSV)
+        launchSafely(intent, REQ_IMPORT_CSV, "CSV 导入")
     }
 
     override fun exportDiagnostics() {
-        createDocument("text/csv", "diagnostics.csv", REQ_DIAGNOSTICS)
+        createDocument("text/csv", "diagnostics.csv", REQ_DIAGNOSTICS, "诊断日志导出")
     }
 
     override fun exportPng(bitmap: Bitmap) {
         pendingBitmap = bitmap
-        createDocument("image/png", "chart.png", REQ_EXPORT_PNG)
+        createDocument("image/png", "chart.png", REQ_EXPORT_PNG, "图片导出")
     }
 
     override fun openSystemSettings() {
         val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
             data = Uri.parse("package:$packageName")
         }
-        startActivity(intent)
+        launchSafely(intent, null, "系统设置")
     }
 
-    private fun createDocument(mime: String, title: String, requestCode: Int) {
+    /** 系统应用缺失时给出提示并清理暂存，避免点击后无任何反应。 */
+    private fun launchSafely(intent: Intent, requestCode: Int?, label: String) {
+        try {
+            if (requestCode == null) startActivity(intent) else startActivityForResult(intent, requestCode)
+        } catch (error: ActivityNotFoundException) {
+            container.diagnostics.log("ACTIVITY_NOT_FOUND $label ${error.javaClass.simpleName}")
+            if (requestCode != null) clearPending(requestCode)
+            toast(activityLaunchFailureMessage(label))
+        }
+    }
+
+    private fun createDocument(mime: String, title: String, requestCode: Int, label: String) {
         val intent = Intent(Intent.ACTION_CREATE_DOCUMENT).apply {
             addCategory(Intent.CATEGORY_OPENABLE)
             type = mime
             putExtra(Intent.EXTRA_TITLE, title)
         }
-        startActivityForResult(intent, requestCode)
+        launchSafely(intent, requestCode, label)
     }
 
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {

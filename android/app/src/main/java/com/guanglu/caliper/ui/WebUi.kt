@@ -30,6 +30,9 @@ import com.guanglu.caliper.core.model.CHIP_TEXT_SIZE_SP
 import com.guanglu.caliper.core.model.ChannelPalette
 import com.guanglu.caliper.core.model.Units
 import com.guanglu.caliper.core.model.ValueTone
+import com.guanglu.caliper.core.model.INTERACTIVE_CHIP_CORNER_RADIUS_DP
+import com.guanglu.caliper.core.model.READONLY_TAG_CLICKABLE
+import com.guanglu.caliper.core.model.READONLY_TAG_CORNER_RADIUS_DP
 import com.guanglu.caliper.core.model.channelFilterPlaceholders
 import com.guanglu.caliper.core.model.valueToneOf
 import java.text.SimpleDateFormat
@@ -237,13 +240,21 @@ fun Context.webBanner(text: String, tone: WebTone): TextView =
         ).apply { bottomMargin = dp(Web.CARD_GAP) }
     }
 
+/** 只读状态标签；小圆角描边且不可点击，与胶囊状可点击通道 chip 区分。 */
 fun Context.webChip(text: String, tone: WebTone = WebTone.NEUTRAL): TextView = TextView(this).apply {
     this.text = text
     textSize = 11.5f
-    setTypeface(null, Typeface.BOLD)
+    setTypeface(null, Typeface.NORMAL)
     setTextColor(chipText(tone))
-    background = webDrawable(chipFill(tone), dp(18).toFloat())
+    background = webDrawable(
+        chipFill(tone),
+        dp(READONLY_TAG_CORNER_RADIUS_DP).toFloat(),
+        Web.LINE,
+        dp(1)
+    )
     setPadding(dp(10), dp(5), dp(10), dp(5))
+    isClickable = READONLY_TAG_CLICKABLE
+    isFocusable = false
 }
 
 fun Context.webChipFlow(items: List<View>): LinearLayout = LinearLayout(this).apply {
@@ -538,7 +549,7 @@ fun Context.webChChip(text: String, dotColor: Int, on: Boolean, onClick: () -> U
         minimumHeight = dp(CHIP_MIN_HEIGHT_DP)
         background = webDrawable(
             if (on) Web.PRIMARY_SOFT else Web.CARD,
-            dp(18).toFloat(),
+            dp(INTERACTIVE_CHIP_CORNER_RADIUS_DP).toFloat(),
             if (on) Web.CHIP_ACTIVE_BORDER else Web.LINE,
             1
         )

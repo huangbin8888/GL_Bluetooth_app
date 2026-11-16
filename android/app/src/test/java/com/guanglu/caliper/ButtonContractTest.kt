@@ -8,6 +8,7 @@ import com.guanglu.caliper.core.model.channelFilterFits
 import com.guanglu.caliper.core.model.channelFilterPlaceholders
 import com.guanglu.caliper.core.model.channelFilterRows
 import com.guanglu.caliper.core.model.exportAction
+import com.guanglu.caliper.core.model.readonlyTagIsDistinct
 import com.guanglu.caliper.core.model.safResultMessage
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -229,6 +230,60 @@ class ButtonContractTest {
         assertTrue("send() 未显示提示", sendBody.contains("actions.toast"))
         assertTrue("模式切换未抑制重复提示", pages.contains("notifySent = false"))
         assertTrue("成功下发文案缺失", read("core/model/UiActionPolicy.kt").contains("等待卡尺回数"))
+    }
+
+    @Test
+    fun activityLaunchHasVisibleFailureFallback() {
+        val activity = read("ui/MainActivity.kt")
+        assertTrue("未捕获 ActivityNotFoundException", activity.contains("ActivityNotFoundException"))
+        assertTrue("启动未收敛到统一入口", activity.contains("launchSafely("))
+        assertEquals(
+            "存在绕过兜底的 startActivity",
+            1,
+            Regex("startActivity\\(").findAll(activity).count()
+        )
+        assertEquals(
+            "存在绕过兜底的 startActivityForResult",
+            1,
+            Regex("startActivityForResult\\(").findAll(activity).count()
+        )
+        val body = lambdaBody(activity, activity.indexOf("private fun launchSafely("))
+        assertTrue("启动失败无可见提示", body.contains("toast("))
+        assertTrue("启动失败未清理暂存", body.contains("clearPending"))
+        assertTrue("启动失败未写诊断", body.contains("ACTIVITY_NOT_FOUND"))
+    }
+
+    @Test
+    fun exportButtonLabelTracksSelection() {
+        val page = read("ui/pages/ExportSettingsPages.kt")
+        val start = page.indexOf("internal fun exportPage(")
+        val end = page.indexOf("private fun settingsMeasureCard(")
+        assertTrue("缺少导出页函数", start >= 0 && end > start)
+        val exportBody = page.substring(start, end)
+        assertTrue("导出按钮初始文案与默认动作不符", exportBody.contains("webButton(\"导出 CSV\", primary = true)"))
+        assertFalse("导出页仍使用会误导的「保存」按钮", exportBody.contains("webButton(\"保存\""))
+        assertTrue("设置页的「保存」仍应真实保存全部设置", page.substring(end).contains("webButton(\"保存\", primary = true)"))
+        assertTrue("导出按钮未接入状态策略", exportBody.contains("exportButtonState("))
+        assertTrue("按钮文案未实时更新", exportBody.contains("saveButton.text = state.label"))
+        assertTrue("状态说明未实时更新", exportBody.contains("hintLine.text = state.hint"))
+        assertTrue(
+            "勾选变化未刷新按钮",
+            Regex("refreshExport\\(\\)").findAll(exportBody).count() >= 5
+        )
+    }
+
+    @Test
+    fun readonlyTagIsNotClickableAndLooksDifferent() {
+        val webUi = read("ui/WebUi.kt")
+        val tag = functionBody(webUi, "fun Context.webChip(")
+        assertFalse("只读标签仍绑定点击监听", tag.contains("setOnClickListener"))
+        assertTrue("只读标签未显式声明不可点击", tag.contains("READONLY_TAG_CLICKABLE"))
+        assertTrue("只读标签未使用小圆角", tag.contains("READONLY_TAG_CORNER_RADIUS_DP"))
+        assertTrue("只读标签未去掉焦点", tag.contains("isFocusable = false"))
+        val chip = functionBody(webUi, "fun Context.webChChip(")
+        assertTrue("可点 chip 丢失胶囊圆角常量", chip.contains("INTERACTIVE_CHIP_CORNER_RADIUS_DP"))
+        assertTrue("可点 chip 丢失可点击标记", chip.contains("isClickable = true"))
+        assertTrue(readonlyTagIsDistinct())
     }
 
     private companion object {

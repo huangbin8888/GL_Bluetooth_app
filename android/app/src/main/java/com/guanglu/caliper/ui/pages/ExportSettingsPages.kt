@@ -9,6 +9,7 @@ import com.guanglu.caliper.core.model.ChannelPalette
 import com.guanglu.caliper.core.model.ExportAction
 import com.guanglu.caliper.core.model.Units
 import com.guanglu.caliper.core.model.exportAction
+import com.guanglu.caliper.core.model.exportButtonState
 import com.guanglu.caliper.core.model.parseDecimals
 import com.guanglu.caliper.ui.*
 
@@ -24,11 +25,14 @@ internal fun exportPage(context: Context, c: AppContainer, actions: UiActions): 
     contentCard.addView(webCardTitle("导出内容"))
     var csvChecked = true
     var pngChecked = false
+    var refreshExport: () -> Unit = {}
     contentCard.addView(webCheck("图表 PNG", "勾选后提示到数据分析页导出图片", pngChecked) { on ->
         pngChecked = on
+        refreshExport()
     })
-    contentCard.addView(webCheck("数据 CSV", "取消勾选后「保存」不会再导出 CSV", csvChecked) { on ->
+    contentCard.addView(webCheck("数据 CSV", "取消勾选后不会导出 CSV", csvChecked) { on ->
         csvChecked = on
+        refreshExport()
     })
     col.addView(contentCard)
 
@@ -44,6 +48,7 @@ internal fun exportPage(context: Context, c: AppContainer, actions: UiActions): 
             split = false
             setSplit(false)
         }
+        refreshExport()
     }
     setMerge = mergeSetter
     val (splitRow, splitSetter) = webCheckPair(
@@ -51,6 +56,7 @@ internal fun exportPage(context: Context, c: AppContainer, actions: UiActions): 
     ) { on ->
         split = on
         if (on) setMerge(false)
+        refreshExport()
     }
     setSplit = splitSetter
     rangeCard.addView(mergeRow)
@@ -64,7 +70,9 @@ internal fun exportPage(context: Context, c: AppContainer, actions: UiActions): 
         "保存到手机「下载 / Documents」，走系统文件选择器 SAF；不申请宽泛存储权限。\nCSV 为 UTF-8 BOM，可重新导入；同名文件不覆盖。",
         WebTone.BLUE
     ))
-    col.addView(webButton("保存", primary = true) {
+    val hintLine = webTiny("")
+    col.addView(hintLine)
+    val saveButton = webButton("导出 CSV", primary = true) {
         when (exportAction(csvChecked, pngChecked, split)) {
             ExportAction.EXPORT_ALL_CSV -> actions.exportCsv(null)
             ExportAction.CSV_AND_PNG_GUIDE -> {
@@ -76,7 +84,14 @@ internal fun exportPage(context: Context, c: AppContainer, actions: UiActions): 
             ExportAction.CHANNEL_FILES -> actions.toast("请在下方按通道分别导出 CSV")
             ExportAction.NO_CONTENT -> actions.toast("未勾选任何导出内容，请至少勾选「数据 CSV」")
         }
-    })
+    }
+    col.addView(saveButton)
+    refreshExport = {
+        val state = exportButtonState(csvChecked, pngChecked, split)
+        saveButton.text = state.label
+        hintLine.text = state.hint
+    }
+    refreshExport()
     for (i in 1..ChannelPalette.MAX_CHANNELS step 2) {
         val first = webButton("只导 CH$i CSV", small = true) { actions.exportCsv(i) }
         if (i + 1 <= ChannelPalette.MAX_CHANNELS) {

@@ -77,6 +77,37 @@ internal fun exportAction(csv: Boolean, png: Boolean, split: Boolean): ExportAct
     }
 
 /**
+ * 导出按钮的文案与状态说明；按钮名称随勾选状态与实际动作保持一致。
+ *
+ * @author AI-Generated
+ */
+internal data class ExportButtonState(val label: String, val hint: String)
+
+/** 不产出文件的分支不得叫「保存」，避免点击后只弹说明却没生成文件。 */
+internal fun exportButtonState(csv: Boolean, png: Boolean, split: Boolean): ExportButtonState =
+    when (exportAction(csv, png, split)) {
+        ExportAction.EXPORT_ALL_CSV -> ExportButtonState(
+            "导出 CSV", "将打开系统文件选择器，保存全部通道的测量 CSV"
+        )
+        ExportAction.CSV_AND_PNG_GUIDE -> ExportButtonState(
+            "导出 CSV", "先保存 CSV；图表 PNG 请到「数据分析」页点『导出这张图』"
+        )
+        ExportAction.PNG_GUIDE -> ExportButtonState(
+            "查看 PNG 导出说明", "只勾选了 PNG；V1 在本页不导出图片，点击可看到去向"
+        )
+        ExportAction.CHANNEL_FILES -> ExportButtonState(
+            "查看分通道导出说明", "已选「按通道分文件」，请用下方「只导 CHx CSV」分别保存"
+        )
+        ExportAction.NO_CONTENT -> ExportButtonState(
+            "请选择导出内容", "当前未勾选任何内容；至少勾选「数据 CSV」才会生成文件"
+        )
+    }
+
+/** 系统缺少处理该意图的应用时的提示，避免文件选择器缺失时点击无反应。 */
+internal fun activityLaunchFailureMessage(label: String): String =
+    "无法打开「$label」：此设备缺少对应的系统应用（文件选择器或设置页），操作未完成"
+
+/**
  * 统计卡片文本：空数据时三格必须复位，避免清除数据后残留旧值。
  *
  * @author AI-Generated
