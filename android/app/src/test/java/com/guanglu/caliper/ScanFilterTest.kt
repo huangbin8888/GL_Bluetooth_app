@@ -27,10 +27,18 @@ class ScanFilterTest {
         )
     }
 
-    @Test fun cached_name_wins_when_present() {
+    /** 改名后 Android 系统缓存名常滞后，必须优先用本次广播里的名字。 */
+    @Test fun advertised_name_wins_over_stale_cached_name() {
+        assertEquals(
+            "GL-BLE#9999",
+            GuangluCaliperHandler.pickBroadcastName("GL-BLE#0187", "GL-BLE#9999")
+        )
+    }
+
+    @Test fun cached_name_is_only_a_fallback_when_advertised_is_blank() {
         assertEquals(
             "GL-BLE#0187",
-            GuangluCaliperHandler.pickBroadcastName("GL-BLE#0187", "GL-BLE#9999")
+            GuangluCaliperHandler.pickBroadcastName("GL-BLE#0187", "  ")
         )
     }
 

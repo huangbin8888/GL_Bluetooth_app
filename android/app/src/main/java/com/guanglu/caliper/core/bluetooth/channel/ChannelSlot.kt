@@ -8,6 +8,7 @@ interface FrameSink {
     fun onMeasurement(frame: CaliperFrame.Measurement)
     fun onWrite(bytes: ByteArray)
     fun onAck(frame: CaliperFrame.Ack)
+    fun onNameReport(frame: CaliperFrame.NameReport)
     fun onUnknown(text: String)
 }
 
@@ -40,6 +41,7 @@ class ChannelSlot(
                 driver.ackBytesFor(frame)?.let { sink.onWrite(it) }
             }
             is CaliperFrame.Ack -> sink.onAck(frame)
+            is CaliperFrame.NameReport -> sink.onNameReport(frame)
             is CaliperFrame.Unknown -> sink.onUnknown(text)
         }
     }

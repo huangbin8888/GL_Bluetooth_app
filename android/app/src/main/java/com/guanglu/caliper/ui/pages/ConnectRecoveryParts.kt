@@ -13,7 +13,9 @@ import android.widget.TextView
 import androidx.core.content.ContextCompat
 import com.guanglu.caliper.AppContainer
 import com.guanglu.caliper.core.model.BT_STATE_ON
+import com.guanglu.caliper.core.model.deviceAddressHint
 import com.guanglu.caliper.core.model.knownDevicesCaption
+import com.guanglu.caliper.core.model.knownDeviceLabel
 import com.guanglu.caliper.ui.webButton
 import com.guanglu.caliper.ui.webTiny
 import kotlinx.coroutines.CoroutineScope
@@ -49,14 +51,14 @@ internal fun renderKnownDevices(
                 gravity = Gravity.CENTER_VERTICAL
             }
             row.addView(
-                context.webTiny("${device.name} · ${device.mac.takeLast(4)}"),
+                context.webTiny(knownDeviceLabel(device.name, device.mac)).apply { maxLines = 2 },
                 LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
             )
             row.addView(context.webButton("重连", small = true) {
                 if (c.connect(device.mac)) {
-                    actions.toast("正在重连 ${device.name}…")
+                    actions.toast("正在重连 ${device.name}（${deviceAddressHint(device.mac)}）…")
                 } else {
-                    actions.toast("通道已满，未连接 ${device.mac.takeLast(4)}")
+                    actions.toast("通道已满，未连接 ${deviceAddressHint(device.mac)}")
                 }
             })
             list.addView(row)

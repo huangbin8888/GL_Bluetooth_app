@@ -9,6 +9,7 @@ import com.guanglu.caliper.core.bluetooth.device.CaliperDevice
 import com.guanglu.caliper.core.bluetooth.device.GuangluCaliperHandler
 import com.guanglu.caliper.core.model.CaliperFrame
 import com.guanglu.caliper.core.model.ChannelPalette
+import com.guanglu.caliper.core.model.NAM_QUERY_TIMEOUT_MS
 import java.util.Timer
 import java.util.TimerTask
 import java.util.concurrent.ConcurrentHashMap
@@ -24,6 +25,15 @@ sealed class ChannelEvent {
     data class LimitReached(val actual: Int) : ChannelEvent()
     data class Ack(val channelNo: Int, val command: String, val ok: Boolean) : ChannelEvent()
     data class NamResult(
+        val channelNo: Int,
+        val mac: String,
+        val name: String,
+        val ok: Boolean,
+        val reason: String = ""
+    ) : ChannelEvent()
+
+    /** 查询卡尺真实广播名的回包；ok=false 时为写失败或超时。 */
+    data class NameReport(
         val channelNo: Int,
         val mac: String,
         val name: String,
@@ -46,6 +56,7 @@ class ChannelManager(
     private val onDiagnostic: (String) -> Unit = {},
     private val connectTimeoutMs: Long = CONNECT_TIMEOUT_MS,
     private val namTimeoutMs: Long = NAM_TIMEOUT_MS,
+    private val nameQueryTimeoutMs: Long = NAM_QUERY_TIMEOUT_MS,
     private val clock: () -> Long = { System.currentTimeMillis() }
 ) : BleConnectionCallback {
 
@@ -56,8 +67,10 @@ class ChannelManager(
     private val retryCount = ConcurrentHashMap<String, Int>()
     private val connectTimers = ConcurrentHashMap<String, TimerTask>()
     private val namTimers = ConcurrentHashMap<String, TimerTask>()
+    private val nameQueryTimers = ConcurrentHashMap<String, TimerTask>()
     private val lastActivity = ConcurrentHashMap<String, Long>()
     private val pendingNam = ConcurrentHashMap<String, String>()
+    private val pendingNameQuery = ConcurrentHashMap<String, Int>()
     private val retryTimer = Timer("cmd-retry", true)
 
     @Volatile
@@ -168,6 +181,56 @@ class ChannelManager(
         return true
     }
 
+    /** 下发 NAM 查询读取卡尺真实广播名；写失败与超时都给出明确结果。 */
+    fun queryNam(channelNo: Int): Boolean {
+        val mac = allocator.macOf(channelNo)
+        if (mac == null) {
+            onDiagnostic("NAM_QUERY_NO_CHANNEL CH$channelNo")
+            return false
+        }
+        val bytes = GuangluCaliperHandler.buildNamQueryCommand()
+        pendingNameQuery[mac] = channelNo
+        commandQueue.submit(mac, bytes) { ok ->
+            if (!ok) failNameQuery(mac, channelNo, "查询写入失败（通道未连接或特征不可写）")
+        }
+        onDiagnostic("TX CH$channelNo $mac ${String(bytes, Charsets.US_ASCII)}")
+        scheduleNameQueryTimeout(mac, channelNo)
+        return true
+    }
+
+    private fun scheduleNameQueryTimeout(mac: String, channelNo: Int) {
+        nameQueryTimers.remove(mac)?.cancel()
+        nameQueryTimers[mac] = retryTimer.schedule(nameQueryTimeoutMs) {
+            if (pendingNameQuery.remove(mac) == null) return@schedule
+            nameQueryTimers.remove(mac)
+            onDiagnostic("NAM_QUERY_TIMEOUT $mac")
+            onEvent(
+                ChannelEvent.NameReport(
+                    channelNo,
+                    mac,
+                    "",
+                    false,
+                    "卡尺未回名称查询（${nameQueryTimeoutMs / 1000} 秒超时）"
+                )
+            )
+        }
+    }
+
+    private fun failNameQuery(mac: String, channelNo: Int, cause: String) {
+        if (pendingNameQuery.remove(mac) == null) {
+            onDiagnostic("NAM_QUERY_LATE_FAIL $mac $cause")
+            return
+        }
+        nameQueryTimers.remove(mac)?.cancel()
+        onDiagnostic("NAM_QUERY_FAIL $mac $cause")
+        onEvent(ChannelEvent.NameReport(channelNo, mac, "", false, cause))
+    }
+
+    private fun clearNameQuery(mac: String) {
+        pendingNameQuery.remove(mac)
+        nameQueryTimers.remove(mac)?.cancel()
+    }
+
     private fun scheduleNamTimeout(mac: String, channelNo: Int, name: String) {
         namTimers.remove(mac)?.cancel()
         namTimers[mac] = retryTimer.schedule(namTimeoutMs) {
@@ -208,6 +271,7 @@ class ChannelManager(
         slots.remove(mac)
         commandQueue.cancelFor(mac)
         clearNam(mac)
+        clearNameQuery(mac)
         lastCommand.remove(mac)
         lastActivity.remove(mac)
         onEvent(ChannelEvent.Disconnected(slot, mac, reason))
@@ -230,6 +294,8 @@ class ChannelManager(
         connectTimers.clear()
         namTimers.values.forEach { it.cancel() }
         namTimers.clear()
+        nameQueryTimers.values.forEach { it.cancel() }
+        nameQueryTimers.clear()
         retryTimer.cancel()
         pendingConnections.clear()
         connectingMac = null
@@ -244,6 +310,7 @@ class ChannelManager(
         retryCount.clear()
         lastActivity.clear()
         pendingNam.clear()
+        pendingNameQuery.clear()
     }
 
     // ---- BleConnectionCallback ----
@@ -272,6 +339,7 @@ class ChannelManager(
         slots.remove(mac)
         commandQueue.cancelFor(mac)
         clearNam(mac)
+        clearNameQuery(mac)
         lastCommand.remove(mac)
         onEvent(ChannelEvent.Disconnected(slotNo, mac, reason))
         pumpConnections()
@@ -283,6 +351,7 @@ class ChannelManager(
         slots.remove(mac)
         commandQueue.cancelFor(mac)
         clearNam(mac)
+        clearNameQuery(mac)
         connectingMac = null
         onDiagnostic("CONNECT_FAIL $mac $reason")
         // 错误指向资源耗尽时下调机型上限。
@@ -313,6 +382,17 @@ class ChannelManager(
 
         override fun onWrite(bytes: ByteArray) {
             commandQueue.submit(mac, bytes)
+        }
+
+        override fun onNameReport(frame: CaliperFrame.NameReport) {
+            val pending = pendingNameQuery.remove(mac)
+            if (pending == null) {
+                onDiagnostic("NAM_QUERY_UNSOLICITED $mac ${frame.name}")
+                return
+            }
+            nameQueryTimers.remove(mac)?.cancel()
+            onDiagnostic("NAM_QUERY_REPLY $mac ${frame.name}")
+            onEvent(ChannelEvent.NameReport(pending, mac, frame.name, frame.name.isNotBlank()))
         }
 
         override fun onAck(frame: CaliperFrame.Ack) {

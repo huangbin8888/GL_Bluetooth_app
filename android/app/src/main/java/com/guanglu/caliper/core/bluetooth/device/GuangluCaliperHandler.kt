@@ -15,16 +15,20 @@ object GuangluCaliperHandler : CaliperDevice {
     const val MAX_NAME_LENGTH = 16
     const val COMMAND_NAM = "NAM"
 
+    /** 获取模块广播名称的查询指令（APP→模块），按接口文档单独定义。 */
+    const val COMMAND_NAM_QUERY = "NAM"
+
     val SERVICE_UUID: UUID = UUID.fromString("0000ffb0-0000-1000-8000-00805f9b34fb")
     val CHARACTERISTIC_UUID: UUID = UUID.fromString("0000ffb2-0000-1000-8000-00805f9b34fb")
 
     private val DATA = Regex("^(DAT0|DAT1):([mi])([+-])(\\d+(?:\\.\\d+)?)$")
     private val ACK = Regex("^(MEAS|CLR|MOD|NAM):(OK|ERR)$")
     private val NAME_SUFFIX = Regex("^[A-Za-z0-9_-]+$")
+    private val NAME_REPORT = Regex("^NAM:(?!OK$|ERR$)(.+)$")
 
-    /** 扫描名称取缓存名，缺失时回退广播名。 */
+    /** 扫描名称取本次广播名，缺失时回退系统缓存名；改名后缓存名常滞后。 */
     fun pickBroadcastName(cachedName: String?, advertisedName: String?): String? =
-        cachedName?.takeIf { it.isNotBlank() } ?: advertisedName?.takeIf { it.isNotBlank() }
+        advertisedName?.takeIf { it.isNotBlank() } ?: cachedName?.takeIf { it.isNotBlank() }
 
     /** 判定广播名是否属于广陆卡尺。 */
     fun matchesBroadcastName(name: String?, prefix: String = NAME_PREFIX): Boolean =
@@ -40,9 +44,9 @@ object GuangluCaliperHandler : CaliperDevice {
         }
     }
 
-    /** 按帧头切分协议帧 */
+    /** 按帧头切分协议帧；NAM: 覆盖文档定义的名称查询回包 NAM:&lt;string&gt;。 */
     val FRAME_START_PATTERN = Regex(
-        "DAT0:|DAT1:|MEAS:OK|MEAS:ERR|CLR:OK|CLR:ERR|MOD:OK|MOD:ERR|NAM:OK|NAM:ERR"
+        "DAT0:|DAT1:|MEAS:OK|MEAS:ERR|CLR:OK|CLR:ERR|MOD:OK|MOD:ERR|NAM:OK|NAM:ERR|NAM:"
     )
 
     override val namePrefix: String get() = NAME_PREFIX
@@ -73,6 +77,10 @@ object GuangluCaliperHandler : CaliperDevice {
                 ok = ack.groupValues[2] == "OK",
                 retryable = command == "MEAS" || command == "MOD"
             )
+        }
+        val nameReport = NAME_REPORT.matchEntire(frame)
+        if (nameReport != null) {
+            return CaliperFrame.NameReport(nameReport.groupValues[1].trim())
         }
         return CaliperFrame.Unknown(frame)
     }
@@ -105,6 +113,9 @@ object GuangluCaliperHandler : CaliperDevice {
         }
         return "NAM:$name".toByteArray(Charsets.US_ASCII)
     }
+
+    /** 查询模块当前广播名称；与设置指令不同，不带冒号与参数。 */
+    fun buildNamQueryCommand(): ByteArray = COMMAND_NAM_QUERY.toByteArray(Charsets.US_ASCII)
 
     /**
      * HID 键盘录入数值转成 DAT0 帧。

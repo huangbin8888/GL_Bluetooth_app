@@ -19,6 +19,9 @@ sealed class CaliperFrame {
     /** 回包是否需要重试。 */
     data class Ack(val command: String, val ok: Boolean, val retryable: Boolean = false) : CaliperFrame()
 
+    /** 模块回答「获取广播名称」查询时回报的真实名称。 */
+    data class NameReport(val name: String) : CaliperFrame()
+
     /** 无法识别的帧。 */
     data class Unknown(val text: String) : CaliperFrame()
 }

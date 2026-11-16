@@ -397,6 +397,71 @@ class ButtonContractTest {
         assertTrue("设置页未同步三连提醒文案", read("ui/pages/SettingsParts.kt").contains("三连蜂鸣"))
     }
 
+    @Test
+    fun deviceListsShowFullBluetoothAddress() {
+        val scanned = read("ui/pages/ConnectParts.kt")
+        val known = read("ui/pages/ConnectRecoveryParts.kt")
+        assertTrue(
+            "发现设备列表未使用完整地址标签",
+            scanned.contains("scannedDeviceLabel(device.name, device.mac, device.rssi)")
+        )
+        assertTrue(
+            "已连过卡尺列表未使用完整地址标签",
+            known.contains("knownDeviceLabel(device.name, device.mac)")
+        )
+        assertFalse("发现设备列表仍截断 MAC", scanned.contains("takeLast(4)"))
+        assertFalse("已连过卡尺列表仍截断 MAC", known.contains("takeLast(4)"))
+        assertTrue("连接提示未使用完整地址", scanned.contains("deviceAddressHint(mac)"))
+        assertTrue("重连提示未使用完整地址", known.contains("deviceAddressHint(device.mac)"))
+        val start = scanned.indexOf("private fun createDeviceButton(")
+        assertTrue("缺少设备按钮工厂", start >= 0)
+        val end = scanned.indexOf("\n    fun start()", start)
+        assertTrue("设备按钮工厂边界缺失", end > start)
+        val factory = scanned.substring(start, end)
+        assertTrue("设备按钮未放开单行限制", factory.contains("setSingleLine(false)"))
+        assertTrue("设备按钮未允许两行", factory.contains("maxLines = 2"))
+        assertTrue("设备按钮仍会省略完整 MAC", factory.contains("ellipsize = null"))
+        val knownRow = lambdaBody(known, known.indexOf("internal fun renderKnownDevices("))
+        assertTrue("已连过卡尺文本未允许两行", knownRow.contains("maxLines = 2"))
+        val policy = read("core/model/DeviceAddressPolicy.kt")
+        assertFalse("地址策略仍在截断", policy.contains("takeLast"))
+        assertTrue("地址策略未规范化大小写", policy.contains("trim().uppercase()"))
+    }
+
+    @Test
+    fun namChangeIsVerifiedAgainstDeviceBroadcastName() {
+        val container = read("AppContainer.kt")
+        assertTrue("缺少 NAM 查询门面", container.contains("fun queryNam(channelNo: Int): Boolean"))
+        assertTrue("缺少名称回读 Flow 门面", container.contains("fun deviceNameReports(): Flow<DeviceNameReport>"))
+        assertTrue("NAM:OK 后未自动回读", container.contains("channelManager.queryNam(event.channelNo)"))
+        assertTrue("未接入回读比对策略", container.contains("verifyNam(target, event.name)"))
+        assertTrue("确认后未同步本地登记名", container.contains("if (verified) deviceConfig.renameDevice("))
+        assertFalse("仍在宣称 NAM:OK 即改名成功", container.contains("改名成功："))
+        val namResult = lambdaBody(container, container.indexOf("private fun handleNamResult("))
+        assertTrue("NAM 受理分支缺少诊断", namResult.contains("NAM_VERIFY_REQUEST"))
+        assertFalse("NAM:OK 仍直接写本地登记名", namResult.contains("renameDevice"))
+        assertFalse("NAM:OK 仍直接宣称生效", namResult.contains("改名生效"))
+        val nameReport = lambdaBody(container, container.indexOf("private fun handleNameReport("))
+        assertTrue("回读结果未推送给设置页", nameReport.contains("nameReports.tryEmit"))
+        assertTrue("回读失败未给出明确原因", nameReport.contains("namVerifyFailureMessage"))
+        assertTrue("手动查询未给出卡尺来源说明", nameReport.contains("namQueryMessage"))
+        val settings = read("ui/pages/SettingsParts.kt")
+        val readButton = lambdaBody(settings, settings.indexOf("webButton(\"读取卡尺广播名\""))
+        assertTrue("读取按钮未下发 NAM 查询", readButton.contains("c.queryNam(channelNo)"))
+        assertFalse("读取按钮仍只读本地登记名", readButton.contains("c.deviceConfig.load"))
+        assertTrue("设置页未订阅设备回读名", settings.contains("c.deviceNameReports().collect"))
+        assertTrue("页面销毁未取消订阅", settings.contains("job.cancel()"))
+        assertTrue("本地登记按钮未声明不改卡尺", settings.contains("卡尺广播名未改动"))
+        val handler = read("core/bluetooth/device/GuangluCaliperHandler.kt")
+        assertTrue("缺少 NAM 查询命令", handler.contains("buildNamQueryCommand()"))
+        assertTrue("未解析 NAM:<string> 回包", handler.contains("CaliperFrame.NameReport"))
+        assertTrue("广播名未优先取本次广播", handler.contains("advertisedName?.takeIf"))
+        val manager = read("core/bluetooth/channel/ChannelManager.kt")
+        assertTrue("缺少查询超时", manager.contains("scheduleNameQueryTimeout"))
+        assertTrue("缺少回包事件", manager.contains("ChannelEvent.NameReport"))
+        assertTrue("断连未清理查询", manager.contains("clearNameQuery(mac)"))
+    }
+
     private companion object {
         const val SOURCE_PATH = "src/main/java/com/guanglu/caliper"
         const val EXPECTED_BUTTON_SITES = 40

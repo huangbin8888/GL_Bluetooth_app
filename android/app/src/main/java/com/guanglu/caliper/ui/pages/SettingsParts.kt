@@ -1,6 +1,7 @@
 package com.guanglu.caliper.ui.pages
 
 import android.content.Context
+import android.view.View
 import android.widget.ArrayAdapter
 import android.widget.EditText
 import android.widget.LinearLayout
@@ -18,6 +19,7 @@ import com.guanglu.caliper.ui.webSpinner
 import com.guanglu.caliper.ui.webSwitch
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 
 /**
@@ -34,7 +36,9 @@ internal fun settingsBluetoothCard(
     card.addView(webCardTitle("蓝牙配置（新增 · 设备端参数）"))
     card.addView(webBanner(
         "设备端参数，App 不下发。自动发射时长、蓝牙自动休眠、HID 结束符由卡尺固件持有；本页仅按设备登记。\n" +
-            "接口文档只定义 NAM 改广播名；Android 第三方 App 无法配置卡尺 HID 键盘模式参数。",
+            "接口文档只定义 NAM 改广播名；Android 第三方 App 无法配置卡尺 HID 键盘模式参数。\n" +
+            "「保存登记（不下发）」只改 App 本地显示名，不会改卡尺广播名；\n" +
+            "要让卡尺生效必须点「下发改名（NAM）」，设备回 NAM:OK 后 App 会回读真实广播名验证。",
         WebTone.WARN
     ))
     val labels = mutableListOf<String>()
@@ -66,10 +70,25 @@ internal fun settingsBluetoothCard(
             if (count == 0) "当前无在线通道，请先在「连接」页连接卡尺" else "已刷新，在线 $count 个通道"
         )
     }))
-    card.addView(webField("修改蓝牙名称", "NAM:<string> · ≤16 字符", nameInput))
+    card.addView(webField("修改蓝牙名称", "NAM:<string> · ≤16 字符 · 下发后回读设备名验证", nameInput))
     card.addView(namActionRow(context, c, actions, target, nameInput, channelNumbers))
     card.addView(registrationFields(context, c, actions, target, nameInput, channelNumbers))
+    observeDeviceNameReports(card, c, nameInput)
     card
+}
+
+/** 订阅卡尺真实广播名回读结果并回填输入框；页面移除时取消订阅，避免常驻协程。 */
+private fun observeDeviceNameReports(card: LinearLayout, c: AppContainer, nameInput: EditText) {
+    val job: Job = CoroutineScope(Dispatchers.Main).launch {
+        c.deviceNameReports().collect { report -> nameInput.setText(report.name) }
+    }
+    card.addOnAttachStateChangeListener(object : View.OnAttachStateChangeListener {
+        override fun onViewAttachedToWindow(view: View) = Unit
+        override fun onViewDetachedFromWindow(view: View) {
+            job.cancel()
+            card.removeOnAttachStateChangeListener(this)
+        }
+    })
 }
 
 /** 下拉位置对应的真实通道号；无在线通道时返回 null。 */
@@ -98,30 +117,19 @@ private fun namActionRow(
                 actions.toast("名称非法（须保留 GL-BLE# 前缀、总长 8–16）或 CH$channelNo 已断开")
                 return@webButton
             }
-            actions.toast("改名指令已写入 CH$channelNo，等待设备回包；3 秒无回包会提示")
+            actions.toast("已向 CH$channelNo 下发 NAM，等设备回包后自动回读卡尺广播名验证是否生效")
         },
-        webButton("读取当前名称", small = true) {
+        webButton("读取卡尺广播名", small = true) {
             val channelNo = selectedChannel(target, numbers)
-            val mac = channelNo?.let { c.channelSlots()[it] } ?: c.settings.lastMac
-            if (mac == null) {
-                actions.toast("该通道未连接且无历史设备，无法读取登记名")
+            if (channelNo == null) {
+                actions.toast("当前无在线通道，请先在「连接」页连接卡尺后读取")
                 return@webButton
             }
-            CoroutineScope(Dispatchers.Main).launch {
-                runCatching { c.deviceConfig.load(mac) }
-                    .onSuccess { device ->
-                        val current = device?.customName ?: device?.name
-                        if (current == null) {
-                            actions.toast("本地未登记 ${mac.takeLast(4)} 的名称")
-                        } else {
-                            nameInput.setText(current)
-                            actions.toast("已填入本地登记名：$current")
-                        }
-                    }
-                    .onFailure { error ->
-                        actions.toast("读取登记名失败：${error.javaClass.simpleName}，请重试")
-                    }
+            if (!c.queryNam(channelNo)) {
+                actions.toast("CH$channelNo 已断开，无法读取卡尺广播名")
+                return@webButton
             }
+            actions.toast("已向 CH$channelNo 下发 NAM 查询，等待卡尺回包；3 秒无回包会提示")
         }
     )
 }
@@ -165,7 +173,7 @@ private fun registrationFields(
                 sleepMinutes = sleepMinutes.text.toString().toIntOrNull(),
                 terminator = c.settings.terminator
             )
-            actions.toast("已按 MAC ${mac.takeLast(4)} 登记设备端参数，未下发到卡尺")
+            actions.toast("已按 MAC ${mac.takeLast(4)} 保存 App 本地登记名；卡尺广播名未改动，改设备请点「下发改名」")
         },
         webButton("注入示例 HID 输入", small = true) {
             hidInput.setText("155.15\t155.08\t154.96\t")

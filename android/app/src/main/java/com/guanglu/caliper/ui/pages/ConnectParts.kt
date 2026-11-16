@@ -12,6 +12,8 @@ import com.guanglu.caliper.AppContainer
 import com.guanglu.caliper.core.bluetooth.ScannedDevice
 import com.guanglu.caliper.core.bluetooth.ScanRegistry
 import com.guanglu.caliper.core.model.ChannelPalette
+import com.guanglu.caliper.core.model.deviceAddressHint
+import com.guanglu.caliper.core.model.scannedDeviceLabel
 import com.guanglu.caliper.ui.Web
 import com.guanglu.caliper.ui.WebTone
 import com.guanglu.caliper.ui.dp
@@ -145,17 +147,22 @@ internal class ScanSession(
                 deviceButtons[device.mac] = it
                 list.addView(it)
             }
-            button.text = "${device.name} · ${device.mac.takeLast(4)} · ${device.rssi}dBm"
+            button.text = scannedDeviceLabel(device.name, device.mac, device.rssi)
         }
     }
 
+    /** 两行文字承载完整 MAC，不允许单行省略。 */
     private fun createDeviceButton(mac: String): Button =
-        list.context.webButton(mac.takeLast(4), small = true) {
-            actions.toast("正在连接 ${mac.takeLast(4)}…")
+        list.context.webButton(deviceAddressHint(mac), small = true) {
+            actions.toast("正在连接 ${deviceAddressHint(mac)}…")
             if (!c.connect(mac)) {
-                actions.toast("通道已满，未连接 ${mac.takeLast(4)}")
+                actions.toast("通道已满，未连接 ${deviceAddressHint(mac)}")
             }
             onConnected()
+        }.apply {
+            setSingleLine(false)
+            maxLines = 2
+            ellipsize = null
         }
 
     fun start() {

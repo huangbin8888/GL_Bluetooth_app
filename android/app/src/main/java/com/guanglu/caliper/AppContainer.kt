@@ -30,17 +30,24 @@ import com.guanglu.caliper.core.model.BT_STATE_OFF
 import com.guanglu.caliper.core.model.BT_STATE_ON
 import com.guanglu.caliper.core.model.BluetoothRecoveryAction
 import com.guanglu.caliper.core.model.ChannelPalette
+import com.guanglu.caliper.core.model.DeviceNameReport
 import com.guanglu.caliper.core.model.IDLE_POLL_INTERVAL_MS
 import com.guanglu.caliper.core.model.MAX_RECOVERY_TICKS
+import com.guanglu.caliper.core.model.NamVerification
 import com.guanglu.caliper.core.model.RECOVERY_INTERVAL_MS
 import com.guanglu.caliper.core.model.RecoveryDecision
 import com.guanglu.caliper.core.model.bluetoothRecoveryAction
 import com.guanglu.caliper.core.model.deviceDisplayName
+import com.guanglu.caliper.core.model.namQueryFailureMessage
+import com.guanglu.caliper.core.model.namQueryMessage
+import com.guanglu.caliper.core.model.namVerificationMessage
+import com.guanglu.caliper.core.model.namVerifyFailureMessage
 import com.guanglu.caliper.core.model.overLimitAlertMessage
 import com.guanglu.caliper.core.model.recoveryDecision
 import com.guanglu.caliper.core.model.recoveryTargets
 import com.guanglu.caliper.core.model.shouldAutoConnectScanned
 import com.guanglu.caliper.core.model.shouldBeep
+import com.guanglu.caliper.core.model.verifyNam
 import com.guanglu.caliper.core.usecase.BatchUseCase
 import com.guanglu.caliper.core.usecase.CaptureMeasurementsUseCase
 import com.guanglu.caliper.core.usecase.DeviceConfigUseCase
@@ -52,6 +59,8 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 
@@ -152,6 +161,14 @@ class AppContainer(context: Context) {
     fun sendCommand(channelNo: Int, command: CaliperCommand): Boolean =
         channelManager.sendCommand(channelNo, command)
     fun applyNam(channelNo: Int, name: String): Boolean = channelManager.applyNam(channelNo, name)
+
+    /** 下发 NAM 查询读取卡尺真实广播名；写失败与超时由 NameReport 事件反馈。 */
+    fun queryNam(channelNo: Int): Boolean {
+        val accepted = channelManager.queryNam(channelNo)
+        diagnostics.log("NAM_QUERY_REQUEST CH$channelNo accepted=$accepted")
+        return accepted
+    }
+
     fun onlineCount(): Int = channelManager.onlineCount()
     fun channelSlots(): Map<Int, String> = channelManager.channelSlots()
     fun disconnectAll(): Int {
@@ -409,6 +426,12 @@ class AppContainer(context: Context) {
     private val reconnectStopped = ConcurrentHashMap.newKeySet<String>()
     private val eventThrottle = UiEventThrottle()
 
+    /** 卡尺真实广播名回读结果；无 replay，切页重建时不会用旧名覆盖输入框。 */
+    private val nameReports = MutableSharedFlow<DeviceNameReport>(extraBufferCapacity = NAME_REPORT_BUFFER)
+
+    /** 已下发 NAM 但尚未回读验证的目标名，按 MAC 隔离，确认前不改本地登记名。 */
+    private val pendingNamTargets = ConcurrentHashMap<String, String>()
+
     @Volatile
     private var lastAutoConnectMs = 0L
 
@@ -453,6 +476,9 @@ class AppContainer(context: Context) {
                 device.mac to deviceDisplayName(device.name, device.customName, device.mac)
             }
         }
+
+    /** 卡尺真实广播名回读流；设置页订阅后回填输入框，不携带本地登记名。 */
+    fun deviceNameReports(): Flow<DeviceNameReport> = nameReports.asSharedFlow()
 
     /** 清空全部检测记录；Room Flow 会刷新表格与统计，回调带回删除行数。 */
     fun clearMeasurements(onCleared: (Int) -> Unit) {
@@ -522,6 +548,7 @@ class AppContainer(context: Context) {
         runCatching { appContext.unregisterReceiver(bluetoothReceiver) }
             .onFailure { error -> diagnostics.log("BT_WATCHER_UNREG_FAIL ${error.javaClass.simpleName}") }
         eventThrottle.clear()
+        pendingNamTargets.clear()
         channelManager.close()
         capture.close()
         overLimitBeep.close()
@@ -538,6 +565,7 @@ class AppContainer(context: Context) {
             }
             is ChannelEvent.Disconnected -> {
                 clearContinuous(event.channelNo)
+                pendingNamTargets.remove(event.mac)
                 if (eventThrottle.allow("disconnect:${event.mac}")) {
                     uiEvent("CH${event.channelNo} 断开：${event.reason}")
                 }
@@ -552,21 +580,67 @@ class AppContainer(context: Context) {
                     uiEvent("CH${event.channelNo} ${event.command} ERR（重试中）")
                 }
             }
-            is ChannelEvent.NamResult -> {
-                if (event.ok && event.name.isNotBlank()) {
-                    deviceConfig.renameDevice(event.mac, event.name)
-                }
-                diagnostics.log("NAM_RESULT ${event.mac} ${event.name} ok=${event.ok} ${event.reason}")
-                if (eventThrottle.allow("nam:${event.mac}")) {
-                    uiEvent(
-                        if (event.ok) "CH${event.channelNo} 改名成功：${event.name}，可能需重连生效"
-                        else "CH${event.channelNo} 改名失败：${event.reason.ifBlank { "设备回 ERR" }}"
-                    )
-                }
+            is ChannelEvent.NamResult -> handleNamResult(event)
+            is ChannelEvent.NameReport -> handleNameReport(event)
+        }
+    }
+
+    /** NAM:OK 只表示设备受理；必须回读真实广播名确认后才同步本地登记名。 */
+    private fun handleNamResult(event: ChannelEvent.NamResult) {
+        diagnostics.log("NAM_RESULT ${event.mac} ${event.name} ok=${event.ok} ${event.reason}")
+        if (!event.ok) {
+            val reason = event.reason.ifBlank { "设备回 ERR" }
+            pendingNamTargets.remove(event.mac)
+            diagnostics.log("NAM_NOT_APPLIED ${event.mac} $reason")
+            uiEvent("CH${event.channelNo} 改名失败：$reason；App 本地登记名未改动")
+            return
+        }
+        pendingNamTargets[event.mac] = event.name
+        diagnostics.log("NAM_VERIFY_REQUEST ${event.mac} target=${event.name}")
+        uiEvent("CH${event.channelNo} 设备已回 NAM:OK，正在回读卡尺真实广播名验证…")
+        mainHandler.post {
+            val accepted = channelManager.queryNam(event.channelNo)
+            diagnostics.log("NAM_VERIFY_QUERY ${event.mac} accepted=$accepted")
+            if (!accepted) {
+                pendingNamTargets.remove(event.mac)
+                diagnostics.log("NAM_VERIFY_SEND_FAIL ${event.mac}")
+                uiEvent(namVerifyFailureMessage("通道已断开，无法下发查询", event.channelNo))
             }
         }
     }
+
+    /** 回读名与期望名一致才确认生效；不一致、超时或写失败都不改本地登记名。 */
+    private fun handleNameReport(event: ChannelEvent.NameReport) {
+        val target = pendingNamTargets.remove(event.mac)
+        diagnostics.log(
+            "NAM_REPORT ${event.mac} name=${event.name} ok=${event.ok} " +
+                "target=${target.orEmpty()} ${event.reason}"
+        )
+        val reason = event.reason.ifBlank { "卡尺未回名称查询" }
+        if (!event.ok) {
+            diagnostics.log("NAM_QUERY_FAIL_EVENT ${event.mac} $reason")
+            uiEvent(
+                if (target == null) namQueryFailureMessage(reason)
+                else namVerifyFailureMessage(reason, event.channelNo)
+            )
+            return
+        }
+        val verified = target != null && verifyNam(target, event.name) == NamVerification.CONFIRMED
+        if (!nameReports.tryEmit(DeviceNameReport(event.mac, event.name, target, verified))) {
+            diagnostics.log("NAM_REPORT_EMIT_FAIL ${event.mac}")
+        }
+        if (target == null) {
+            uiEvent(namQueryMessage(event.name))
+            return
+        }
+        if (verified) deviceConfig.renameDevice(event.mac, event.name)
+        diagnostics.log("NAM_VERIFY ${event.mac} verified=$verified target=$target actual=${event.name}")
+        uiEvent(namVerificationMessage(target, event.name, event.channelNo))
+    }
 }
+
+/** 名称回读流的缓冲容量；无订阅者时也不阻塞回包线程。 */
+internal const val NAME_REPORT_BUFFER = 8
 
 /** 自动重连次数上限与两次调度间隔。 */
 internal const val MAX_AUTO_RECONNECT = 3

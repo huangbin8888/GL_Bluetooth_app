@@ -1,5 +1,6 @@
 package com.guanglu.caliper
 
+import com.guanglu.caliper.core.bluetooth.FrameBuffer
 import com.guanglu.caliper.core.bluetooth.device.CaliperCommand
 import com.guanglu.caliper.core.bluetooth.device.GuangluCaliperHandler
 import com.guanglu.caliper.core.model.CaliperFrame
@@ -69,7 +70,39 @@ class ProtocolTest {
 
     @Test fun nam_and_error_acks_are_recognised() {
         assertEquals(CaliperFrame.Ack("NAM", true), GuangluCaliperHandler.accept("NAM:OK"))
+        assertEquals(CaliperFrame.Ack("NAM", false), GuangluCaliperHandler.accept("NAM:ERR"))
         assertEquals(CaliperFrame.Ack("MOD", false, true), GuangluCaliperHandler.accept("MOD:ERR"))
+        assertFalse(GuangluCaliperHandler.accept("NAM:OK") is CaliperFrame.NameReport)
+    }
+
+    @Test fun nam_query_reply_is_a_real_device_name_report() {
+        assertEquals(
+            CaliperFrame.NameReport("GL-BLE#0187"),
+            GuangluCaliperHandler.accept("NAM:GL-BLE#0187")
+        )
+        assertEquals(
+            CaliperFrame.NameReport("GL-BLE#0187"),
+            GuangluCaliperHandler.accept("  NAM:GL-BLE#0187  ")
+        )
+        assertEquals("NAM", String(GuangluCaliperHandler.buildNamQueryCommand()))
+        assertEquals("NAM:OK", GuangluCaliperHandler.FRAME_START_PATTERN.find("NAM:OK")?.value)
+        assertEquals("NAM:", GuangluCaliperHandler.FRAME_START_PATTERN.find("NAM:GL-BLE#0187")?.value)
+    }
+
+    @Test fun name_report_survives_frame_buffer_tail_flush() {
+        val buffer = FrameBuffer()
+        assertTrue(buffer.feed("NAM:GL-BLE#0187").isEmpty())
+        assertEquals("NAM:GL-BLE#0187", buffer.flush())
+    }
+
+    @Test fun advertised_name_takes_priority_over_stale_cached_name() {
+        assertEquals(
+            "GL-BLE#9999",
+            GuangluCaliperHandler.pickBroadcastName("GL-BLE#0187", "GL-BLE#9999")
+        )
+        assertEquals("GL-BLE#0187", GuangluCaliperHandler.pickBroadcastName("GL-BLE#0187", null))
+        assertEquals("GL-BLE#9999", GuangluCaliperHandler.pickBroadcastName(null, "GL-BLE#9999"))
+        assertNull(GuangluCaliperHandler.pickBroadcastName("", "  "))
     }
 
     @Test fun hid_token_reuses_the_same_parser() {
