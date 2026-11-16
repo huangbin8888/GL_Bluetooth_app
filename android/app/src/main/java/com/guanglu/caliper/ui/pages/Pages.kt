@@ -15,7 +15,9 @@ import com.guanglu.caliper.core.model.ChannelPalette
 import com.guanglu.caliper.core.model.Units
 import com.guanglu.caliper.core.model.acceptedSegmentIndex
 import com.guanglu.caliper.core.model.batchConnectMessage
+import com.guanglu.caliper.core.model.channelDeviceTags
 import com.guanglu.caliper.core.model.commandFeedback
+import com.guanglu.caliper.core.model.measurementDeviceName
 import com.guanglu.caliper.core.model.statisticsTexts
 import com.guanglu.caliper.core.model.valueToneOf
 import com.guanglu.caliper.ui.*
@@ -23,6 +25,7 @@ import com.guanglu.caliper.ui.chart.ChartCanvasView
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.Locale
@@ -115,7 +118,7 @@ object Pages {
             FrameLayout.LayoutParams.WRAP_CONTENT
         ))
         card.addView(frame)
-        val footer = webTiny("只保留 时间 + 数值 两列 · 通道用行内色标、判定用左侧色条、备注点行查看")
+        val footer = webTiny("时间 + 设备名称 + 数值 三列 · 通道用行内色标、判定用左侧色条、备注点行查看")
         footer.setBackgroundColor(Web.TABLE_HEAD)
         footer.setPadding(dp(10), dp(8), dp(10), dp(8))
         card.addView(footer)
@@ -149,11 +152,16 @@ object Pages {
         }
     }
 
-    private fun channelChips(context: Context, focus: Int, onPick: (Int) -> Unit): List<View> = context.run {
+    private fun channelChips(
+        context: Context,
+        focus: Int,
+        deviceTags: Map<Int, String>,
+        onPick: (Int) -> Unit
+    ): List<View> = context.run {
         val chips = mutableListOf<View>()
         chips.add(webChChip("全部 7 路", 0, focus == 0) { onPick(0) })
         for (i in 1..ChannelPalette.MAX_CHANNELS) {
-            chips.add(webChChip("CH$i", ChannelPalette.colorOf(i), focus == i) { onPick(i) })
+            chips.add(webChChip("CH$i", ChannelPalette.colorOf(i), focus == i, deviceTags[i]) { onPick(i) })
         }
         chips
     }
@@ -259,14 +267,18 @@ object Pages {
 
         var focus = 0
         var latest: List<Measurement> = emptyList()
+        var deviceNames: Map<String, String> = emptyMap()
+        var lastChipTags: Map<Int, String> = emptyMap()
         fun renderTable() {
             val shown = if (focus == 0) latest else latest.filter { it.channelNo == focus }
             table.scope.text = if (focus == 0) "全部通道" else "CH$focus"
-            renderTableRows(context, table, shown, c.settings.decimals, actions)
+            renderTableRows(context, table, shown, c.settings.decimals, deviceNames, actions)
         }
         fun renderChips() {
             chipHost.removeAllViews()
-            chipHost.addView(webChannelFilterFlow(channelChips(context, focus) { picked ->
+            val tags = channelDeviceTags(c.channelSlots(), deviceNames)
+            lastChipTags = tags
+            chipHost.addView(webChannelFilterFlow(channelChips(context, focus, tags) { picked ->
                 focus = picked
                 renderChips()
                 renderTable()
@@ -280,24 +292,33 @@ object Pages {
                 renderTable()
             }
         }
-        val job: Job = CoroutineScope(Dispatchers.Main).launch {
-            c.measurements().collect { items ->
-                latest = items
-                renderTable()
-                count.text = "${items.size} 条"
-                (total.getChildAt(0) as TextView).text = "${items.size}"
-                (ok.getChildAt(0) as TextView).text = "${items.count { it.verdict == "PASS" }}"
-                (bad.getChildAt(0) as TextView).text = "${items.count { it.verdict == "FAIL" }}"
-                val latestItem = items.firstOrNull()
-                val latestValue = latestItem?.let {
-                    Units.formatMm(it.valueUm10, c.settings.decimals)
-                } ?: "—"
-                setReading(reading, latestValue)
-                reading.setTextColor(valueTextColor(valueToneOf(latestItem?.verdict.orEmpty())))
-            }
+        val job: Job = observeMeasurements(c) { items, names ->
+            latest = items
+            deviceNames = names
+            if (channelDeviceTags(c.channelSlots(), names) != lastChipTags) renderChips()
+            renderTable()
+            count.text = "${items.size} 条"
+            (total.getChildAt(0) as TextView).text = "${items.size}"
+            (ok.getChildAt(0) as TextView).text = "${items.count { it.verdict == "PASS" }}"
+            (bad.getChildAt(0) as TextView).text = "${items.count { it.verdict == "FAIL" }}"
+            val latestItem = items.firstOrNull()
+            val latestValue = latestItem?.let {
+                Units.formatMm(it.valueUm10, c.settings.decimals)
+            } ?: "—"
+            setReading(reading, latestValue)
+            reading.setTextColor(valueTextColor(valueToneOf(latestItem?.verdict.orEmpty())))
         }
         page.tag = job
         page
+    }
+
+    /** 检测记录与设备名一起订阅，保证表格、统计与通道 chip 使用同一批名称。 */
+    private fun observeMeasurements(
+        c: AppContainer,
+        onUpdate: (List<Measurement>, Map<String, String>) -> Unit
+    ): Job = CoroutineScope(Dispatchers.Main).launch {
+        combine(c.measurements(), c.deviceNames()) { items, names -> items to names }
+            .collect { (items, names) -> onUpdate(items, names) }
     }
 
     private fun renderTableRows(
@@ -305,6 +326,7 @@ object Pages {
         table: LiveTable,
         shown: List<Measurement>,
         decimals: Int,
+        deviceNames: Map<String, String>,
         actions: UiActions
     ) {
         if (!shouldRenderRows(table.frame.interacting)) {
@@ -318,9 +340,10 @@ object Pages {
             table.body.addView(context.webTableEmpty("该通道暂无数据"))
         } else {
             shown.take(visibleRows(shown.size)).forEach { item ->
-                table.body.addView(context.webTableRow(item, CLOCK, decimals) {
-                    val detail = "CH${item.channelNo} · ${Units.formatMm(item.valueUm10, decimals)}mm · " +
-                        "${item.source} · ${item.note}"
+                val name = measurementDeviceName(deviceNames, item.deviceMac)
+                table.body.addView(context.webTableRow(item, CLOCK, decimals, name) {
+                    val detail = "CH${item.channelNo} · $name · " +
+                        "${Units.formatMm(item.valueUm10, decimals)}mm · ${item.source} · ${item.note}"
                     actions.toast(detail)
                 })
                 table.body.addView(context.webDivider())
@@ -498,7 +521,7 @@ object Pages {
         plan.addView(webCardTitle("多通道显示方案（避免 7 路数据糊在一起）"))
         plan.addView(webTiny(
             "① 固定 7 色编码：连接列表 / 实时表格 / 通道卡 / 图表点 / 导出文件全局一致；\n" +
-                "② 实时检测与记录合并一屏，表格只留「时间 + 数值」两列；\n" +
+                "② 实时检测与记录合并一屏，表格按「时间 + 设备名称 + 数值」三列；\n" +
                 "③ 顶部通道 chips 一键筛选单通道；④ 7 路读数用卡片墙平铺；\n" +
                 "⑤ 图表可叠加或单通道查看；导出可合并或按通道分文件；\n" +
                 "⑥ 单通道断连只灰掉该卡，其余 6 路继续采集。"
@@ -635,6 +658,8 @@ object Pages {
         ))
 
         var latest: List<Measurement> = emptyList()
+        var deviceNames: Map<String, String> = emptyMap()
+        var lastChipTags: Map<Int, String> = emptyMap()
         fun renderChart() {
             val shown = if (focus == 0) latest else latest.filter { it.channelNo == focus }
             chart.points = shown.reversed().map { it.channelNo to it.valueUm10 }
@@ -649,7 +674,9 @@ object Pages {
         }
         fun renderChips() {
             chipHost.removeAllViews()
-            chipHost.addView(webChannelFilterFlow(channelChips(context, focus) { picked ->
+            val tags = channelDeviceTags(c.channelSlots(), deviceNames)
+            lastChipTags = tags
+            chipHost.addView(webChannelFilterFlow(channelChips(context, focus, tags) { picked ->
                 focus = picked
                 renderChips()
                 renderChart()
@@ -657,11 +684,11 @@ object Pages {
         }
         renderChips()
         renderChart()
-        val job: Job = CoroutineScope(Dispatchers.Main).launch {
-            c.measurements().collect { items ->
-                latest = items
-                renderChart()
-            }
+        val job: Job = observeMeasurements(c) { items, names ->
+            latest = items
+            deviceNames = names
+            if (channelDeviceTags(c.channelSlots(), names) != lastChipTags) renderChips()
+            renderChart()
         }
         page.tag = job
         page

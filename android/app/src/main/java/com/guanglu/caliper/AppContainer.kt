@@ -24,6 +24,7 @@ import com.guanglu.caliper.core.datastore.SettingsRepository
 import com.guanglu.caliper.core.model.BEEP_COOLDOWN_MS
 import com.guanglu.caliper.core.model.ChannelPalette
 import com.guanglu.caliper.core.model.IDLE_POLL_INTERVAL_MS
+import com.guanglu.caliper.core.model.deviceDisplayName
 import com.guanglu.caliper.core.model.shouldBeep
 import com.guanglu.caliper.core.usecase.BatchUseCase
 import com.guanglu.caliper.core.usecase.CaptureMeasurementsUseCase
@@ -35,6 +36,8 @@ import java.util.concurrent.ConcurrentHashMap
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 
 /**
@@ -258,6 +261,14 @@ class AppContainer(context: Context) {
     }
 
     fun measurements() = database.measurementDao().observeAll()
+
+    /** MAC 到设备显示名；自定义名优先、登记名其次、缺登记时按 MAC 尾 4 位兜底。 */
+    fun deviceNames(): Flow<Map<String, String>> =
+        database.deviceDao().observeAll().map { devices ->
+            devices.associate { device ->
+                device.mac to deviceDisplayName(device.name, device.customName, device.mac)
+            }
+        }
 
     /** 清空全部检测记录；Room Flow 会刷新表格与统计，回调带回删除行数。 */
     fun clearMeasurements(onCleared: (Int) -> Unit) {

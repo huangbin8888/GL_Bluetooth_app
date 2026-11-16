@@ -33,6 +33,9 @@ import com.guanglu.caliper.core.model.ValueTone
 import com.guanglu.caliper.core.model.INTERACTIVE_CHIP_CORNER_RADIUS_DP
 import com.guanglu.caliper.core.model.READONLY_TAG_CLICKABLE
 import com.guanglu.caliper.core.model.READONLY_TAG_CORNER_RADIUS_DP
+import com.guanglu.caliper.core.model.TABLE_DEVICE_WEIGHT
+import com.guanglu.caliper.core.model.TABLE_TIME_WEIGHT
+import com.guanglu.caliper.core.model.TABLE_VALUE_WEIGHT
 import com.guanglu.caliper.core.model.channelFilterPlaceholders
 import com.guanglu.caliper.core.model.valueToneOf
 import java.text.SimpleDateFormat
@@ -542,7 +545,13 @@ fun Context.webFileLine(text: String): TextView = label(text, 11.5f, false, Web.
     ).apply { bottomMargin = dp(6) }
 }
 
-fun Context.webChChip(text: String, dotColor: Int, on: Boolean, onClick: () -> Unit): LinearLayout =
+fun Context.webChChip(
+    text: String,
+    dotColor: Int,
+    on: Boolean,
+    subtitle: String? = null,
+    onClick: () -> Unit
+): LinearLayout =
     LinearLayout(this).apply {
         orientation = LinearLayout.HORIZONTAL
         gravity = Gravity.CENTER
@@ -571,10 +580,24 @@ fun Context.webChChip(text: String, dotColor: Int, on: Boolean, onClick: () -> U
                 }
             })
         }
-        chip.addView(label(text, CHIP_TEXT_SIZE_SP, true, if (on) Web.PRIMARY else Web.TEXT).apply {
+        val textBox = LinearLayout(ctx).apply { orientation = LinearLayout.VERTICAL }
+        textBox.addView(label(text, CHIP_TEXT_SIZE_SP, true, if (on) Web.PRIMARY else Web.TEXT).apply {
             maxLines = 1
             ellipsize = TextUtils.TruncateAt.END
         })
+        if (subtitle.isNullOrBlank()) {
+            chip.addView(textBox)
+        } else {
+            textBox.addView(label(subtitle, 9f, false, Web.SUB).apply {
+                maxLines = 1
+                ellipsize = TextUtils.TruncateAt.END
+            })
+            chip.addView(textBox, LinearLayout.LayoutParams(
+                0,
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+                1f
+            ))
+        }
     }
 
 fun Context.webChMark(channelNo: Int): TextView = TextView(this).apply {
@@ -666,11 +689,15 @@ fun Context.webTableHeader(): LinearLayout = LinearLayout(this).apply {
 }.also { head ->
     head.addView(
         label("时间", 11f, true, Web.SUB),
-        LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 0.4f)
+        LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, TABLE_TIME_WEIGHT)
+    )
+    head.addView(
+        label("设备名称", 11f, true, Web.SUB),
+        LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, TABLE_DEVICE_WEIGHT)
     )
     head.addView(
         label("数值 (mm)", 11f, true, Web.SUB).apply { gravity = Gravity.END },
-        LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 0.6f)
+        LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, TABLE_VALUE_WEIGHT)
     )
 }
 
@@ -681,6 +708,7 @@ fun Context.webTableRow(
     item: Measurement,
     clock: SimpleDateFormat,
     decimals: Int = 4,
+    deviceName: String = "",
     onClick: () -> Unit
 ): LinearLayout =
     LinearLayout(this).apply {
@@ -700,9 +728,16 @@ fun Context.webTableRow(
             label(clock.format(Date(item.capturedAt)), 11.5f, false, Web.SUB).apply {
                 typeface = Typeface.MONOSPACE
             },
-            LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 0.4f).apply {
+            LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, TABLE_TIME_WEIGHT).apply {
                 marginStart = dp(9)
             }
+        )
+        row.addView(
+            label(deviceName, 10.5f, false, Web.SUB).apply {
+                maxLines = 1
+                ellipsize = TextUtils.TruncateAt.END
+            },
+            LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, TABLE_DEVICE_WEIGHT)
         )
         val valueBox = LinearLayout(ctx).apply {
             orientation = LinearLayout.HORIZONTAL
@@ -718,7 +753,7 @@ fun Context.webTableRow(
                 LinearLayout.LayoutParams.WRAP_CONTENT
             ).apply { marginStart = dp(7) }
         )
-        row.addView(valueBox, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 0.6f))
+        row.addView(valueBox, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, TABLE_VALUE_WEIGHT))
     }
 
 fun Context.webTableEmpty(text: String): TextView = label(text, 11f, false, Web.SUB).apply {

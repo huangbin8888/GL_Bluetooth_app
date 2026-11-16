@@ -10,6 +10,7 @@ import com.guanglu.caliper.core.model.channelFilterRows
 import com.guanglu.caliper.core.model.exportAction
 import com.guanglu.caliper.core.model.readonlyTagIsDistinct
 import com.guanglu.caliper.core.model.safResultMessage
+import com.guanglu.caliper.core.model.tableColumnsFit
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -284,6 +285,46 @@ class ButtonContractTest {
         assertTrue("可点 chip 丢失胶囊圆角常量", chip.contains("INTERACTIVE_CHIP_CORNER_RADIUS_DP"))
         assertTrue("可点 chip 丢失可点击标记", chip.contains("isClickable = true"))
         assertTrue(readonlyTagIsDistinct())
+    }
+
+    @Test
+    fun deviceNameFlowIsWiredIntoCaptureAndAnalysis() {
+        val container = read("AppContainer.kt")
+        assertTrue("缺少设备名 Flow 门面", container.contains("fun deviceNames(): Flow<Map<String, String>>"))
+        assertTrue(
+            "设备名未按登记名解析",
+            container.contains("deviceDisplayName(device.name, device.customName, device.mac)")
+        )
+        val pages = read("ui/pages/Pages.kt")
+        assertTrue(
+            "订阅未同时收集记录与设备名",
+            pages.contains("combine(c.measurements(), c.deviceNames())")
+        )
+        assertEquals(
+            "检测页与分析页未同时订阅设备名",
+            2,
+            Regex("observeMeasurements\\(c\\)").findAll(pages).count()
+        )
+        assertTrue("表格行未解析设备名称", pages.contains("measurementDeviceName(deviceNames, item.deviceMac)"))
+        assertTrue("通道 chip 未接入设备短标签", pages.contains("channelDeviceTags(c.channelSlots(), deviceNames)"))
+        assertTrue("设备名变化未重绘通道 chip", pages.contains("!= lastChipTags"))
+    }
+
+    @Test
+    fun captureTableRendersThreeColumnsAndChipSubtitle() {
+        val webUi = read("ui/WebUi.kt")
+        val head = functionBody(webUi, "fun Context.webTableHeader(")
+        assertTrue("表头缺少设备名称列", head.contains("label(\"设备名称\""))
+        assertTrue("表头未使用三列权重", head.contains("TABLE_DEVICE_WEIGHT"))
+        val row = functionBody(webUi, "fun Context.webTableRow(")
+        assertTrue("表格行缺少设备名称参数", row.contains("deviceName: String"))
+        assertTrue("表格行未显示设备名称", row.contains("label(deviceName"))
+        assertTrue("表格行未约束名称单行省略", row.contains("TextUtils.TruncateAt.END"))
+        val chip = functionBody(webUi, "fun Context.webChChip(")
+        assertTrue("通道 chip 缺少副行参数", chip.contains("subtitle: String?"))
+        assertTrue("通道 chip 未渲染副行", chip.contains("label(subtitle"))
+        assertTrue("通道 chip 副行未保持可点击", chip.contains("isClickable = true"))
+        assertTrue(tableColumnsFit())
     }
 
     private companion object {
