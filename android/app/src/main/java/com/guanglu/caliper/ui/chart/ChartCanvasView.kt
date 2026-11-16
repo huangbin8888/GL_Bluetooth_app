@@ -11,21 +11,17 @@ import com.guanglu.caliper.core.model.CHART_GRID_LINES
 import com.guanglu.caliper.core.model.CHART_TIME_TICKS
 import com.guanglu.caliper.core.model.ChartSample
 import com.guanglu.caliper.core.model.ChannelPalette
-import com.guanglu.caliper.core.model.TrendTone
 import com.guanglu.caliper.core.model.Units
 import com.guanglu.caliper.core.model.chartAxisTicks
 import com.guanglu.caliper.core.model.chartTimeTicks
-import com.guanglu.caliper.core.model.chartValueLabelIndices
 import com.guanglu.caliper.core.model.formatChartTime
 import com.guanglu.caliper.core.model.isOverLimit
-import com.guanglu.caliper.core.model.trendMark
-import com.guanglu.caliper.core.model.trendToneOf
 import com.guanglu.caliper.ui.Web
 import com.guanglu.caliper.ui.dp
 import kotlin.math.roundToLong
 
 /**
- * 股市分时图风格的原生 Canvas 图表：数值刻度、时间轴、关键点标注与最新值高亮。
+ * 只以 X 时间轴与 Y 数值轴刻度呈现数值的原生 Canvas 图表，曲线上不叠加气泡框或点标注。
  *
  * @author AI-Generated
  */
@@ -36,7 +32,7 @@ class ChartCanvasView(context: Context) : View(context) {
     var mode: Mode = Mode.LINE
     /** 旧版通道与数值对；新版页面改用 samples，此属性保留供导出兼容。 */
     var points: List<Pair<Int, Long>> = emptyList()
-    /** 带采集时刻的样本，用于横轴时间线与最新值高亮。 */
+    /** 带采集时刻的样本，用于横轴时间线。 */
     var samples: List<ChartSample> = emptyList()
     var decimals: Int = 4
     var lowerUm10: Long? = null
@@ -75,22 +71,10 @@ class ChartCanvasView(context: Context) : View(context) {
         textSize = smallTextSizePx
         textAlign = Paint.Align.RIGHT
     }
-    private val valuePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Web.TEXT
-        textSize = textSizePx
-        isFakeBoldText = true
-        textAlign = Paint.Align.CENTER
-    }
     private val timePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = Web.SUB
         textSize = smallTextSizePx
         textAlign = Paint.Align.CENTER
-    }
-    private val badgePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL }
-    private val badgeTextPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.WHITE
-        textSize = textSizePx
-        isFakeBoldText = true
     }
 
     override fun onDraw(canvas: Canvas) {
@@ -121,7 +105,6 @@ class ChartCanvasView(context: Context) : View(context) {
         )
         drawGrid(canvas, plotLeft, plotRight, low, high, values, yOf)
         drawSeries(canvas, data, plotLeft, plotRight, plotBottom, xOf, yOf)
-        drawLatestBadge(canvas, data, plotLeft, plotRight, plotTop, xOf, yOf)
         drawTimeAxis(canvas, data, plotLeft, plotRight, plotBottom)
     }
 
@@ -135,7 +118,7 @@ class ChartCanvasView(context: Context) : View(context) {
         return (min - pad) to (max + pad)
     }
 
-    /** 右侧价格轴、网格线与上/下限、均值线。 */
+    /** 右侧 Y 轴 mm 数值刻度、网格线与上/下限、均值参考线。 */
     private fun drawGrid(
         canvas: Canvas,
         plotLeft: Float,
@@ -171,7 +154,7 @@ class ChartCanvasView(context: Context) : View(context) {
         canvas.drawText(label, rightX, y - context.dp(3), rightTextPaint)
     }
 
-    /** 折线或柱状，并在首/尾/极值或全部点上标注 mm 数值。 */
+    /** 折线或柱状，只绘制线条与数据点，不叠加任何浮动数值标签。 */
     private fun drawSeries(
         canvas: Canvas,
         data: List<ChartSample>,
@@ -181,7 +164,6 @@ class ChartCanvasView(context: Context) : View(context) {
         xOf: (Int) -> Float,
         yOf: (Long) -> Float
     ) {
-        val labelled = chartValueLabelIndices(data.map { it.valueUm10 })
         if (mode == Mode.LINE) {
             seriesPaint.style = Paint.Style.STROKE
             data.forEachIndexed { index, sample ->
@@ -206,72 +188,16 @@ class ChartCanvasView(context: Context) : View(context) {
                 canvas.drawRect(x, y, x + barWidth, plotBottom, seriesPaint)
             }
         }
+        if (mode != Mode.LINE) return
         data.forEachIndexed { index, sample ->
-            val x = xOf(index)
-            val y = yOf(sample.valueUm10)
             val bad = isOverLimit(sample.verdict)
-            if (mode == Mode.LINE) {
-                seriesPaint.style = Paint.Style.FILL
-                seriesPaint.color = if (bad) Web.BAD else ChannelPalette.colorOf(sample.channelNo)
-                canvas.drawCircle(x, y, if (bad) 7f else 5f, seriesPaint)
-            }
-            if (index in labelled) {
-                valuePaint.color = if (bad) Web.BAD else Web.TEXT
-                canvas.drawText(
-                    Units.formatMm(sample.valueUm10, decimals),
-                    x,
-                    (y - context.dp(7)).coerceAtLeast(context.dp(28) + textSizePx),
-                    valuePaint
-                )
-            }
+            seriesPaint.style = Paint.Style.FILL
+            seriesPaint.color = if (bad) Web.BAD else ChannelPalette.colorOf(sample.channelNo)
+            canvas.drawCircle(xOf(index), yOf(sample.valueUm10), if (bad) 7f else 5f, seriesPaint)
         }
     }
 
-    /** 最新值行情标签：涨红跌绿，超差优先标红。 */
-    private fun drawLatestBadge(
-        canvas: Canvas,
-        data: List<ChartSample>,
-        plotLeft: Float,
-        plotRight: Float,
-        plotTop: Float,
-        xOf: (Int) -> Float,
-        yOf: (Long) -> Float
-    ) {
-        val last = data.last()
-        val previous = data.getOrElse(data.lastIndex - 1) { last }
-        val tone = trendToneOf(last.valueUm10, previous.valueUm10)
-        val color = when {
-            isOverLimit(last.verdict) -> Web.BAD
-            tone == TrendTone.UP -> Web.BAD
-            tone == TrendTone.DOWN -> Web.OK
-            else -> Web.PRIMARY
-        }
-        val x = xOf(data.lastIndex)
-        val y = yOf(last.valueUm10)
-        seriesPaint.style = Paint.Style.FILL
-        seriesPaint.color = color
-        canvas.drawCircle(x, y, 8f, seriesPaint)
-        seriesPaint.style = Paint.Style.STROKE
-        seriesPaint.strokeWidth = 2.5f
-        canvas.drawCircle(x, y, 13f, seriesPaint)
-        seriesPaint.strokeWidth = 4f
-        val label = "${trendMark(tone)} ${Units.formatMm(last.valueUm10, decimals)}"
-        val badgeWidth = valuePaint.measureText(label) + context.dp(12)
-        val badgeLeft = (x - badgeWidth / 2)
-            .coerceAtLeast(plotLeft)
-            .coerceAtMost((plotRight - badgeWidth).coerceAtLeast(plotLeft))
-        val badgeTop = (y - context.dp(32)).coerceAtLeast(plotTop)
-        badgePaint.color = color
-        canvas.drawRoundRect(
-            badgeLeft, badgeTop, badgeLeft + badgeWidth, badgeTop + context.dp(22),
-            context.dp(6).toFloat(), context.dp(6).toFloat(), badgePaint
-        )
-        canvas.drawText(
-            label, badgeLeft + context.dp(6), badgeTop + context.dp(16), badgeTextPaint
-        )
-    }
-
-    /** 底部时间线：等距 HH:mm:ss 刻度，展示数据的时间跨度。 */
+    /** 底部 X 轴：等距 HH:mm:ss 时间刻度，展示数据的时间跨度。 */
     private fun drawTimeAxis(
         canvas: Canvas,
         data: List<ChartSample>,

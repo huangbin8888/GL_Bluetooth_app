@@ -363,18 +363,26 @@ class ButtonContractTest {
     }
 
     @Test
-    fun chartRendersNumericValuesAndTimeAxis() {
+    fun chartShowsOnlyAxisValuesWithoutFloatingBubbles() {
         val chart = read("ui/chart/ChartCanvasView.kt")
-        assertTrue("缺少右侧 mm 数值刻度", chart.contains("chartAxisTicks(low, high"))
-        assertTrue("缺少横轴时间线", chart.contains("chartTimeTicks("))
-        assertTrue("缺少数值标注点策略", chart.contains("chartValueLabelIndices("))
-        assertTrue("刻度未格式化为 mm 数值", chart.contains("Units.formatMm(tick, decimals)"))
-        assertTrue("缺少最新值行情标签", chart.contains("drawRoundRect("))
-        assertTrue("缺少涨跌色调", chart.contains("trendToneOf("))
+        assertTrue("缺少 Y 轴 mm 数值刻度", chart.contains("chartAxisTicks(low, high"))
+        assertTrue("缺少 X 轴时间刻度", chart.contains("chartTimeTicks("))
+        assertTrue("Y 轴刻度未格式化为 mm 数值", chart.contains("Units.formatMm(tick, decimals)"))
+        assertTrue("X 轴刻度未格式化为时间数值", chart.contains("formatChartTime(time)"))
+        assertFalse("仍在绘制圆角气泡背景", chart.contains("drawRoundRect("))
+        assertFalse("仍保留最新值行情气泡", chart.contains("drawLatestBadge"))
+        assertFalse("仍保留气泡专用画笔", chart.contains("badgePaint"))
+        assertFalse("仍叠加数据点数值标注", chart.contains("chartValueLabelIndices("))
+        assertFalse("曲线上仍使用涨跌色调", chart.contains("trendToneOf("))
+        val policy = read("core/model/ChartPresentation.kt")
+        assertFalse("策略层仍保留点标注函数", policy.contains("chartValueLabelIndices"))
+        assertFalse("策略层仍保留逐点标注上限", policy.contains("CHART_FULL_LABEL_LIMIT"))
         val pages = read("ui/pages/Pages.kt")
         assertTrue("分析页未传入带时间戳样本", pages.contains("chart.samples = ordered.map"))
-        assertTrue("分析页未显示行情概览", pages.contains("chartHeadline(chart.samples"))
+        assertTrue("分析页未显示数值概览", pages.contains("chartHeadline(chart.samples"))
         assertTrue("分析页未跟随小数位设置", pages.contains("chart.decimals = c.settings.decimals"))
+        assertTrue("分析页说明未同步为仅轴数值", pages.contains("X 时间轴 · Y 数值轴"))
+        assertFalse("分析页仍宣传涨跌气泡", pages.contains("涨红跌绿"))
     }
 
     @Test

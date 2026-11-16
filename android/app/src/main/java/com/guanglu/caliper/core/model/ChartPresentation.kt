@@ -6,7 +6,7 @@ import java.util.Locale
 import kotlin.math.roundToLong
 
 /**
- * 图表样本：带采集时刻，用于横轴时间线与最新值高亮。
+ * 图表样本：带采集时刻，用于横轴 X 时间刻度与纵轴 Y 数值刻度。
  *
  * @author AI-Generated
  */
@@ -20,9 +20,6 @@ data class ChartSample(
 /** 纵轴网格线数量与横轴时间刻度数量。 */
 internal const val CHART_GRID_LINES = 4
 internal const val CHART_TIME_TICKS = 4
-
-/** 逐点标注的最大样本数，超过后只标首/尾/最高/最低，避免文字重叠。 */
-internal const val CHART_FULL_LABEL_LIMIT = 8
 
 /** 涨跌色调：按 A 股习惯，上行红、下行绿。 */
 internal enum class TrendTone { UP, DOWN, FLAT }
@@ -51,15 +48,6 @@ internal fun chartTimeTicks(firstAt: Long, lastAt: Long, count: Int = CHART_TIME
     if (count < 1) return listOf(firstAt)
     if (lastAt <= firstAt) return List(count + 1) { firstAt }
     return List(count + 1) { index -> firstAt + ((lastAt - firstAt) * index / count) }
-}
-
-/** 需要标注数值的点：样本少时逐点标注，多时只标首、尾、最高、最低。 */
-internal fun chartValueLabelIndices(values: List<Long>): Set<Int> {
-    if (values.isEmpty()) return emptySet()
-    if (values.size <= CHART_FULL_LABEL_LIMIT) return values.indices.toSet()
-    val max = values.maxOrNull() ?: 0L
-    val min = values.minOrNull() ?: 0L
-    return setOf(0, values.lastIndex, values.indexOf(max), values.indexOf(min))
 }
 
 /** 行情式概览：最新值、涨跌、高低、均值与起止时间。 */

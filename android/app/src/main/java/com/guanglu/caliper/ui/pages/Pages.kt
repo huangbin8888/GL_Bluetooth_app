@@ -660,8 +660,8 @@ object Pages {
         col.addView(chipHost)
         col.addView(webChipFlow(listOf(
             webChip("批次：本地", WebTone.BLUE),
-            webChip("mm 数值刻度 + 时间线"),
-            webChip("最新值涨跌 · 涨红跌绿")
+            webChip("X 时间轴 · Y 数值轴"),
+            webChip("不叠加气泡标注")
         )))
         val chartCard = webCard()
         val headline = webTiny("暂无测量数据 · 连接卡尺后自动绘制", 12f, Web.TEXT)

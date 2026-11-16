@@ -1,14 +1,13 @@
 package com.guanglu.caliper
 
-import com.guanglu.caliper.core.model.CHART_FULL_LABEL_LIMIT
 import com.guanglu.caliper.core.model.CHART_GRID_LINES
 import com.guanglu.caliper.core.model.CHART_TIME_TICKS
 import com.guanglu.caliper.core.model.ChartSample
 import com.guanglu.caliper.core.model.TrendTone
+import com.guanglu.caliper.core.model.Units
 import com.guanglu.caliper.core.model.chartAxisTicks
 import com.guanglu.caliper.core.model.chartHeadline
 import com.guanglu.caliper.core.model.chartTimeTicks
-import com.guanglu.caliper.core.model.chartValueLabelIndices
 import com.guanglu.caliper.core.model.formatChartTime
 import com.guanglu.caliper.core.model.trendMark
 import com.guanglu.caliper.core.model.trendToneOf
@@ -17,7 +16,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
- * 图表数值刻度、时间线与关键点标注的回归测试。
+ * 图表 X 时间刻度、Y 数值刻度与行情概览的回归测试。
  *
  * @author AI-Generated
  */
@@ -53,22 +52,22 @@ class ChartPresentationTest {
     }
 
     @Test
-    fun short_series_labels_every_point() {
-        val values = listOf(10L, 11L, 12L, 13L)
-        assertEquals(values.indices.toSet(), chartValueLabelIndices(values))
-        assertTrue(chartValueLabelIndices(List(CHART_FULL_LABEL_LIMIT) { it.toLong() }).size == CHART_FULL_LABEL_LIMIT)
+    fun y_axis_ticks_render_as_mm_numbers() {
+        val ticks = chartAxisTicks(120_000L, 120_400L, CHART_GRID_LINES)
+        val labels = ticks.map { Units.formatMm(it, 4) }
+        assertEquals(CHART_GRID_LINES + 1, labels.size)
+        assertEquals("12.0000", labels.first())
+        assertEquals("12.0400", labels.last())
+        assertTrue(labels.all { Regex("\\d+\\.\\d{4}").matches(it) })
     }
 
     @Test
-    fun long_series_labels_only_extremes_head_and_tail() {
-        val values = listOf(50L, 20L, 40L, 60L, 30L, 45L, 55L, 25L, 35L)
-        val indices = chartValueLabelIndices(values)
-        assertTrue(indices.contains(0))
-        assertTrue(indices.contains(values.lastIndex))
-        assertTrue(indices.contains(values.indexOf(60L)))
-        assertTrue(indices.contains(values.indexOf(20L)))
-        assertTrue(indices.size <= 4)
-        assertTrue(chartValueLabelIndices(emptyList()).isEmpty())
+    fun x_axis_ticks_render_as_time_numbers() {
+        val first = 1_700_000_000_000L
+        val ticks = chartTimeTicks(first, first + 60_000L, CHART_TIME_TICKS)
+        val labels = ticks.map { formatChartTime(it) }
+        assertEquals(CHART_TIME_TICKS + 1, labels.size)
+        assertTrue(labels.all { Regex("\\d{2}:\\d{2}:\\d{2}").matches(it) })
     }
 
     @Test
