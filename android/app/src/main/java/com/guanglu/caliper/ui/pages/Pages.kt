@@ -11,6 +11,7 @@ import com.guanglu.caliper.AppContainer
 import com.guanglu.caliper.core.bluetooth.ScannedDevice
 import com.guanglu.caliper.core.bluetooth.device.CaliperCommand
 import com.guanglu.caliper.core.database.entity.Measurement
+import com.guanglu.caliper.core.model.ChannelNamePolicy
 import com.guanglu.caliper.core.model.ChannelPalette
 import com.guanglu.caliper.core.model.Units
 import com.guanglu.caliper.core.model.ChartSample
@@ -157,6 +158,7 @@ object Pages {
 
     private fun channelChips(
         context: Context,
+        names: Map<Int, String>,
         focus: Int,
         deviceTags: Map<Int, String>,
         onPick: (Int) -> Unit
@@ -164,7 +166,10 @@ object Pages {
         val chips = mutableListOf<View>()
         chips.add(webChChip("全部 7 路", 0, focus == 0) { onPick(0) })
         for (i in 1..ChannelPalette.MAX_CHANNELS) {
-            chips.add(webChChip("CH$i", ChannelPalette.colorOf(i), focus == i, deviceTags[i]) { onPick(i) })
+            chips.add(webChChip(
+                ChannelNamePolicy.displayLabel(names, i),
+                ChannelPalette.colorOf(i), focus == i, deviceTags[i]
+            ) { onPick(i) })
         }
         chips
     }
@@ -257,12 +262,13 @@ object Pages {
     private fun capture(context: Context, c: AppContainer, actions: UiActions): View = context.run {
         val page = screen(context)
         val col = page.col()
+        val channelNames = c.channelNames()
         val readingCard = webCard()
         val head = LinearLayout(context).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
         }
-        head.addView(webBold("当前读数 · CH1", 12f, Web.SUB), even(context))
+        head.addView(webBold("当前读数 · ${ChannelNamePolicy.displayLabel(channelNames, 1)}", 12f, Web.SUB), even(context))
         head.addView(webChip("手动 · DAT0", WebTone.BLUE))
         readingCard.addView(head)
         val reading = webReading("—")
@@ -292,14 +298,18 @@ object Pages {
         var lastChipTags: Map<Int, String> = emptyMap()
         fun renderTable() {
             val shown = if (focus == 0) latest else latest.filter { it.channelNo == focus }
-            table.scope.text = if (focus == 0) "全部通道" else "CH$focus"
-            renderTableRows(context, table, shown, c.settings.decimals, deviceNames, actions)
+            table.scope.text = if (focus == 0) {
+                "全部通道"
+            } else {
+                ChannelNamePolicy.displayLabel(channelNames, focus)
+            }
+            renderTableRows(context, table, shown, c.settings.decimals, deviceNames, channelNames, actions)
         }
         fun renderChips() {
             chipHost.removeAllViews()
             val tags = channelDeviceTags(c.channelSlots(), deviceNames)
             lastChipTags = tags
-            chipHost.addView(webChannelFilterFlow(channelChips(context, focus, tags) { picked ->
+            chipHost.addView(webChannelFilterFlow(channelChips(context, channelNames, focus, tags) { picked ->
                 focus = picked
                 renderChips()
                 renderTable()
@@ -348,6 +358,7 @@ object Pages {
         shown: List<Measurement>,
         decimals: Int,
         deviceNames: Map<String, String>,
+        channelNames: Map<Int, String>,
         actions: UiActions
     ) {
         if (!shouldRenderRows(table.frame.interacting)) {
@@ -362,8 +373,9 @@ object Pages {
         } else {
             shown.take(visibleRows(shown.size)).forEach { item ->
                 val name = measurementDeviceName(deviceNames, item.deviceMac)
-                table.body.addView(context.webTableRow(item, CLOCK, decimals, name) {
-                    val detail = "CH${item.channelNo} · $name · " +
+                val channelLabel = ChannelNamePolicy.displayLabel(channelNames, item.channelNo)
+                table.body.addView(context.webTableRow(item, CLOCK, decimals, name, channelLabel) {
+                    val detail = "$channelLabel · $name · " +
                         "${Units.formatMm(item.valueUm10, decimals)}mm · ${item.source} · ${item.note}"
                     actions.toast(detail)
                 })
@@ -408,6 +420,7 @@ object Pages {
     }
 
     private fun captureControls(context: Context, c: AppContainer, actions: UiActions): List<View> = context.run {
+        val commandNames = c.channelNames()
         val seg = webSeg(
             listOf("mm", "inch"), 0,
             accept = { index -> acceptedSegmentIndex(0, index) == index },
@@ -428,7 +441,10 @@ object Pages {
                 listOf(webChip("无在线通道", WebTone.WARN))
             } else {
                 online.map { no ->
-                    webChChip("CH$no", ChannelPalette.colorOf(no), no == selected) {
+                    webChChip(
+                        ChannelNamePolicy.displayLabel(commandNames, no),
+                        ChannelPalette.colorOf(no), no == selected
+                    ) {
                         selected = no
                         renderTarget()
                     }
@@ -438,7 +454,8 @@ object Pages {
             targetHint.text = if (selected == 0) {
                 "命令目标：无在线通道，MEAS / CLR / 模式均不下发"
             } else {
-                "命令目标：CH$selected（${c.channelSlots()[selected]?.takeLast(4) ?: "—"}）· " +
+                "命令目标：${ChannelNamePolicy.displayLabel(commandNames, selected)}" +
+                    "（${c.channelSlots()[selected]?.takeLast(4) ?: "—"}）· " +
                     if (c.isContinuous(selected)) "连续" else "手动"
             }
             modeButton.text = if (c.isContinuous(selected)) "切换为手动" else "切换为连续"
@@ -473,7 +490,10 @@ object Pages {
             if (send(target, "模式切换", notifySent = false)) {
                 c.setContinuous(channelNo, wantContinuous)
                 renderTarget()
-                actions.toast("CH$channelNo 已切为${if (wantContinuous) "连续" else "手动"}，其他通道不受影响")
+                actions.toast(
+                    "${ChannelNamePolicy.displayLabel(commandNames, channelNo)} " +
+                        "已切为${if (wantContinuous) "连续" else "手动"}，其他通道不受影响"
+                )
             }
         }
         listOf(
@@ -502,6 +522,7 @@ object Pages {
     private fun channels(context: Context, c: AppContainer, actions: UiActions): View = context.run {
         val page = screen(context)
         val col = page.col()
+        val channelNames = c.channelNames()
         col.addView(webBanner(
             "最多 7 通道并发：一台手机同时连接 7 台 GL-BLE# 卡尺。\n每路独立 notify 订阅、帧缓冲、去重与落库；跨通道不去重。",
             WebTone.BLUE
@@ -520,7 +541,7 @@ object Pages {
         occupy.addView(occupyRow)
         val legend = mutableListOf<View>()
         for (i in 1..ChannelPalette.MAX_CHANNELS) {
-            legend.add(webChMark(i))
+            legend.add(webChMark(i, ChannelNamePolicy.displayLabel(channelNames, i)))
         }
         occupy.addView(webChipFlow(legend))
         col.addView(occupy)
@@ -531,7 +552,8 @@ object Pages {
         val values = mutableMapOf<Int, TextView>()
         for (i in 1..ChannelPalette.MAX_CHANNELS) {
             val mac = slots[i]
-            val card = webChCard(i, "— mm", mac ?: "未连接", mac != null)
+            val card = webChCard(i, "— mm", mac ?: "未连接", mac != null,
+                ChannelNamePolicy.displayLabel(channelNames, i))
             val box = card.getChildAt(1) as LinearLayout
             values[i] = box.getChildAt(1) as TextView
             cards.add(card)
@@ -649,6 +671,7 @@ object Pages {
     private fun analysis(context: Context, c: AppContainer, actions: UiActions): View = context.run {
         val page = screen(context)
         val col = page.col()
+        val channelNames = c.channelNames()
         val chart = ChartCanvasView(context).apply {
             layoutParams = LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
@@ -709,7 +732,7 @@ object Pages {
             chipHost.removeAllViews()
             val tags = channelDeviceTags(c.channelSlots(), deviceNames)
             lastChipTags = tags
-            chipHost.addView(webChannelFilterFlow(channelChips(context, focus, tags) { picked ->
+            chipHost.addView(webChannelFilterFlow(channelChips(context, channelNames, focus, tags) { picked ->
                 focus = picked
                 renderChips()
                 renderChart()

@@ -36,6 +36,12 @@ object ChannelNamePolicy {
     /** 取编辑后的通道名，缺失时回退默认名。 */
     fun nameOf(names: Map<Int, String>, channelNo: Int): String = normalize(names[channelNo], channelNo)
 
+    /** 界面展示标签：改动过的通道显示自定义名，未改动的通道仍显示原通道号标签。 */
+    fun displayLabel(names: Map<Int, String>, channelNo: Int): String {
+        val name = nameOf(names, channelNo)
+        return if (name == defaultName(channelNo)) ChannelPalette.labelOf(channelNo) else name
+    }
+
     /**
      * 导入时按通道名反查通道号：先匹配自定义名，再解析 CHn / 通道n。
      * 返回通道号与历史通道标记；未识别时通道号为 0。

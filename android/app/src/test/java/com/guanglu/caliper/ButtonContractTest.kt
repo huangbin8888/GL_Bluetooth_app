@@ -568,6 +568,50 @@ class ButtonContractTest {
         assertTrue("导入未走名称反查", exporter.contains("ChannelNamePolicy.numberFromName("))
     }
 
+    @Test
+    fun channelDisplayLabelsUseEditedNamesOnEveryVisibleSurface() {
+        val pages = read("ui/pages/Pages.kt")
+        fun bodyOf(signature: String): String {
+            val start = pages.indexOf(signature)
+            assertTrue("缺少函数 $signature", start >= 0)
+            return lambdaBody(pages, start)
+        }
+        val chips = bodyOf("private fun channelChips(")
+        assertTrue("通道筛选 chip 未用编辑名", chips.contains("ChannelNamePolicy.displayLabel(names, i)"))
+        assertFalse("通道筛选 chip 仍是硬编码 CHn", chips.contains("webChChip(\"CH\$i\""))
+
+        val capture = bodyOf("private fun capture(")
+        assertTrue("检测页当前读数标题未用编辑名", capture.contains("displayLabel(channelNames, 1)"))
+        assertTrue("检测页表格 scope 未用编辑名", capture.contains("displayLabel(channelNames, focus)"))
+        assertTrue(
+            "检测页表格行未传通道显示名",
+            capture.contains("deviceNames, channelNames, actions)")
+        )
+        val control = bodyOf("private fun captureControls(")
+        assertTrue("命令目标 chip 未用编辑名", control.contains("displayLabel(commandNames, no)"))
+        assertTrue("命令目标提示未用编辑名", control.contains("displayLabel(commandNames, selected)"))
+
+        val analysis = bodyOf("private fun analysis(")
+        assertTrue("分析页筛选 chip 未传通道名", analysis.contains("channelChips(context, channelNames, focus, tags)"))
+
+        val channels = bodyOf("private fun channels(")
+        assertTrue("通道页图例未用编辑名", channels.contains("webChMark(i, ChannelNamePolicy.displayLabel(channelNames, i))"))
+        val cardCall = channels.substring(
+            channels.indexOf("val card = webChCard("),
+            channels.indexOf("val box = card.getChildAt")
+        )
+        assertTrue("通道页卡片墙未用编辑名", cardCall.contains("ChannelNamePolicy.displayLabel(channelNames, i)"))
+    }
+
+    @Test
+    fun displayLabelFavorsCustomNameAndKeepsLegacyNumber() {
+        val names = mapOf(1 to "外径", 2 to "通道2")
+        assertEquals("外径", com.guanglu.caliper.core.model.ChannelNamePolicy.displayLabel(names, 1))
+        assertEquals("CH2", com.guanglu.caliper.core.model.ChannelNamePolicy.displayLabel(names, 2))
+        assertEquals("CH3", com.guanglu.caliper.core.model.ChannelNamePolicy.displayLabel(names, 3))
+        assertEquals("历史通道", com.guanglu.caliper.core.model.ChannelNamePolicy.displayLabel(names, 0))
+    }
+
     private companion object {
         const val SOURCE_PATH = "src/main/java/com/guanglu/caliper"
         const val EXPECTED_BUTTON_SITES = 44

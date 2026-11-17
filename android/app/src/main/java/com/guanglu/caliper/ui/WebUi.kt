@@ -600,8 +600,8 @@ fun Context.webChChip(
         }
     }
 
-fun Context.webChMark(channelNo: Int): TextView = TextView(this).apply {
-    text = ChannelPalette.labelOf(channelNo)
+fun Context.webChMark(channelNo: Int, channelLabel: String? = null): TextView = TextView(this).apply {
+    text = channelLabel ?: ChannelPalette.labelOf(channelNo)
     textSize = 9.5f
     setTypeface(null, Typeface.BOLD)
     setTextColor(Color.WHITE)
@@ -609,7 +609,13 @@ fun Context.webChMark(channelNo: Int): TextView = TextView(this).apply {
     setPadding(dp(5), dp(2), dp(5), dp(2))
 }
 
-fun Context.webChCard(channelNo: Int, value: String, meta: String, online: Boolean): LinearLayout =
+fun Context.webChCard(
+    channelNo: Int,
+    value: String,
+    meta: String,
+    online: Boolean,
+    channelLabel: String? = null
+): LinearLayout =
     LinearLayout(this).apply {
         orientation = LinearLayout.HORIZONTAL
         background = webDrawable(Web.CARD, dp(10).toFloat(), Web.LINE, 1)
@@ -625,7 +631,10 @@ fun Context.webChCard(channelNo: Int, value: String, meta: String, online: Boole
             orientation = LinearLayout.VERTICAL
             setPadding(dp(9), dp(9), dp(8), dp(9))
         }
-        box.addView(label(ChannelPalette.labelOf(channelNo), 12f, true, ChannelPalette.colorOf(channelNo)))
+        box.addView(label(
+            channelLabel ?: ChannelPalette.labelOf(channelNo),
+            12f, true, ChannelPalette.colorOf(channelNo)
+        ))
         box.addView(label(value, 20f, true, Web.TEXT).apply { typeface = Typeface.MONOSPACE })
         box.addView(webTiny(meta, 9.5f))
         card.addView(box, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
@@ -709,6 +718,7 @@ fun Context.webTableRow(
     clock: SimpleDateFormat,
     decimals: Int = 4,
     deviceName: String = "",
+    channelLabel: String? = null,
     onClick: () -> Unit
 ): LinearLayout =
     LinearLayout(this).apply {
@@ -743,7 +753,7 @@ fun Context.webTableRow(
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.END or Gravity.CENTER_VERTICAL
         }
-        valueBox.addView(webChMark(item.channelNo))
+        valueBox.addView(webChMark(item.channelNo, channelLabel))
         valueBox.addView(
             label(Units.formatMm(item.valueUm10, decimals), 15f, true, valueTextColor(tone)).apply {
                 typeface = Typeface.MONOSPACE

@@ -61,6 +61,28 @@ class ChannelNamePolicyTest {
     }
 
     @Test
+    fun displayLabelUsesCustomNameAndKeepsChannelNumberByDefault() {
+        val names = ChannelNamePolicy.decode("外径|内径")
+        assertEquals("外径", ChannelNamePolicy.displayLabel(names, 1))
+        assertEquals("内径", ChannelNamePolicy.displayLabel(names, 2))
+        assertEquals("CH3", ChannelNamePolicy.displayLabel(names, 3))
+        assertEquals("CH7", ChannelNamePolicy.displayLabel(names, 7))
+    }
+
+    @Test
+    fun displayLabelKeepsDefaultAndHistoricalTokens() {
+        assertEquals("CH1", ChannelNamePolicy.displayLabel(emptyMap(), 1))
+        assertEquals("历史通道", ChannelNamePolicy.displayLabel(emptyMap(), 0))
+        assertEquals("历史通道", ChannelNamePolicy.displayLabel(emptyMap(), 8))
+    }
+
+    @Test
+    fun displayLabelFallsBackWhenNameEqualsDefault() {
+        val names = mapOf(1 to "通道1")
+        assertEquals("CH1", ChannelNamePolicy.displayLabel(names, 1))
+    }
+
+    @Test
     fun numberFromNameMatchesCustomNameFirst() {
         val names = ChannelNamePolicy.decode("外径|内径")
         assertEquals(1 to false, ChannelNamePolicy.numberFromName("外径", names))
