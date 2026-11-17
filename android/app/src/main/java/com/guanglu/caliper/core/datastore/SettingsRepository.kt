@@ -73,4 +73,9 @@ class SettingsRepository(context: Context) {
     var channelFilter: Int
         get() = sp.getInt("channel_filter", 0)
         set(value) = sp.edit().putInt("channel_filter", value).apply()
+
+    /** 1..7 通道的编辑名，持久化字符串；默认由 ChannelNamePolicy 逐项兜底。 */
+    var channelNames: String
+        get() = sp.getString("channel_names", "").orEmpty()
+        set(value) = sp.edit().putString("channel_names", value).apply()
 }

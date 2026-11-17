@@ -7,7 +7,6 @@ import android.widget.LinearLayout
 import com.guanglu.caliper.AppContainer
 import com.guanglu.caliper.core.model.ChannelPalette
 import com.guanglu.caliper.core.model.ExportAction
-import com.guanglu.caliper.core.model.Units
 import com.guanglu.caliper.core.model.exportAction
 import com.guanglu.caliper.core.model.exportButtonState
 import com.guanglu.caliper.core.model.parseDecimals
@@ -122,13 +121,10 @@ private fun settingsMeasureCard(
     registerSave: ((Boolean) -> Boolean) -> Unit
 ): LinearLayout = context.run {
     val card = webCard()
-    card.addView(webCardTitle("测量与判定"))
+    card.addView(webCardTitle("测量精度"))
     val decimals = context.webEdit(c.settings.decimals.toString())
-    val lower = context.webEdit(c.settings.lowerLimitUm10?.let { Units.formatMm(it) } ?: "")
-    val upper = context.webEdit(c.settings.upperLimitUm10?.let { Units.formatMm(it) } ?: "")
     card.addView(webField("小数位数（0–4）", "显示与导出统一，默认 4 位不四舍五入", decimals))
-    card.addView(webField("公差下限 (mm)", "设置上下公差后才会判定超差；超差数值变红并三连蜂鸣 + 振动，未设为「未判定」", lower))
-    card.addView(webField("公差上限 (mm)", "", upper))
+    card.addView(webTiny("上下公差已移至下方「通道编辑」统一设置；判定逻辑不变。"))
     val save: (Boolean) -> Boolean = { notify ->
         val parsed = parseDecimals(decimals.text.toString())
         if (parsed == null) {
@@ -137,14 +133,12 @@ private fun settingsMeasureCard(
             false
         } else {
             c.settings.decimals = parsed
-            c.settings.lowerLimitUm10 = Units.toUm10(lower.text.toString(), 'm')
-            c.settings.upperLimitUm10 = Units.toUm10(upper.text.toString(), 'm')
-            if (notify) actions.toast("测量设置已保存")
+            if (notify) actions.toast("小数位数已保存为 $parsed 位")
             true
         }
     }
     registerSave(save)
-    card.addView(webButton("保存测量设置", small = true) { save(true) })
+    card.addView(webButton("保存测量精度", small = true) { save(true) })
     card
 }
 
@@ -153,13 +147,7 @@ internal fun settingsPage(context: Context, c: AppContainer, actions: UiActions)
     val col = page.col()
     val saveForms = mutableListOf<(Boolean) -> Boolean>()
     col.addView(settingsMeasureCard(context, c, actions) { save -> saveForms.add(save) })
-
-    val multi = webCard()
-    multi.addView(webCardTitle("多通道（新增）"))
-    multi.addView(webField("最大并发通道数", "上限 7 台，第 8 台拒绝连接", webBold("7（只读）", 12.5f)))
-    multi.addView(webField("通道色标", "CH1–CH7 固定配色，全 App 一致", webChip("固定 7 色", WebTone.BLUE)))
-    multi.addView(webField("通道命名 / 改色", "V2", webChip("V2")))
-    col.addView(multi)
+    col.addView(channelEditCard(context, c, actions) { save -> saveForms.add(save) })
 
     col.addView(settingsBluetoothCard(context, c, actions))
 
@@ -240,6 +228,7 @@ internal fun settingsPage(context: Context, c: AppContainer, actions: UiActions)
             c.settings.decimals = 4
             c.settings.lowerLimitUm10 = null
             c.settings.upperLimitUm10 = null
+            c.resetChannelNames()
             c.settings.terminator = "CR"
             c.settings.autoConnect = true
             c.settings.autoDisconnectEnabled = false

@@ -475,7 +475,7 @@ class ButtonContractTest {
         assertTrue("公差下限未写入", exporter.contains("\"LOWER_TOL\" to lower"))
         assertTrue("设备名称未写入", exporter.contains("\"DEVICE_MAC\" to device"))
         assertTrue("通道名称未写入", exporter.contains("\"CHANNEL\" to channel"))
-        assertTrue("通道名称未用中文", exporter.contains("channelDisplayName(item.channelNo)"))
+        assertTrue("通道名称未用编辑名", exporter.contains("ChannelNamePolicy.nameOf(channelNames, item.channelNo)"))
         assertTrue("设备名称未用登记名", exporter.contains("measurementDeviceName(names, item.deviceMac)"))
         assertFalse("导出仍写批次号", exporter.contains("\"BATCH\" to"))
         assertFalse("导出仍写英文通道前缀", exporter.contains("val channel = \"CH"))
@@ -533,16 +533,52 @@ class ButtonContractTest {
         assertTrue("设置页未说明默认关闭", page.contains("默认关闭"))
     }
 
+    @Test
+    fun channelNamesAreEditableChineseAndExportedByName() {
+        val settings = read("core/datastore/SettingsRepository.kt")
+        assertTrue("通道名未持久化", settings.contains("var channelNames: String"))
+        assertTrue("通道名未写入 SharedPreferences", settings.contains("putString(\"channel_names\""))
+        val container = read("AppContainer.kt")
+        assertTrue("缺少通道名门面", container.contains("fun channelNames(): Map<Int, String>"))
+        assertTrue("缺少改名门面", container.contains("fun renameChannel("))
+        assertTrue("改名未写诊断", container.contains("CHANNEL_RENAME"))
+        val policy = read("core/model/ChannelNamePolicy.kt")
+        assertTrue("未限制名称长度", policy.contains("InputFilter") || policy.contains("MAX_NAME_CHARS"))
+        assertTrue("未过滤 CSV 危险字符", policy.contains("FORBIDDEN"))
+        assertTrue("导入未支持按名称反查", policy.contains("fun numberFromName("))
+        val editor = read("ui/pages/ChannelEditParts.kt")
+        assertTrue("通道编辑卡缺少中文输入行", editor.contains("channelNameRow("))
+        assertTrue("通道名未限制长度", editor.contains("InputFilter.LengthFilter"))
+        assertTrue("公差未移入编辑卡", editor.contains("公差判定（全通道统一）"))
+        assertTrue("编辑卡未保存公差下限", editor.contains("c.settings.lowerLimitUm10 = lowerUm10"))
+        assertTrue("编辑卡未保存公差上限", editor.contains("c.settings.upperLimitUm10 = upperUm10"))
+        assertTrue("编辑卡未接入保存表单", editor.contains("registerSave(save)"))
+    }
+
+    @Test
+    fun toleranceMovedOutOfMeasureCardAndCsvUsesChannelName() {
+        val page = read("ui/pages/ExportSettingsPages.kt")
+        assertFalse("测量卡仍保留公差输入", page.contains("webField(\"公差下限"))
+        assertTrue("通道编辑卡未接入设置页", page.contains("channelEditCard(context, c, actions)"))
+        assertTrue("恢复默认未重置通道名", page.contains("c.resetChannelNames()"))
+        val activity = read("ui/MainActivity.kt")
+        assertTrue("CSV 文件名未按通道名生成", activity.contains("ChannelNamePolicy.csvFileName(channelNo"))
+        val exporter = read("core/usecase/ImportExportUseCases.kt")
+        assertTrue("导入未解码通道名", exporter.contains("ChannelNamePolicy.decode(settings.channelNames)"))
+        assertTrue("导入未走名称反查", exporter.contains("ChannelNamePolicy.numberFromName("))
+    }
+
     private companion object {
         const val SOURCE_PATH = "src/main/java/com/guanglu/caliper"
-        const val EXPECTED_BUTTON_SITES = 41
+        const val EXPECTED_BUTTON_SITES = 44
         val BUTTON_PATTERN = Regex("webButton\\(\\s*\"([^\"]+)\"")
         val SWITCH_PATTERN = Regex("setOnCheckedChangeListener")
         val BUTTON_FILES = listOf(
             "ui/pages/Pages.kt",
             "ui/pages/ExportSettingsPages.kt",
             "ui/pages/SettingsParts.kt",
-            "ui/pages/ConnectRecoveryParts.kt"
+            "ui/pages/ConnectRecoveryParts.kt",
+            "ui/pages/ChannelEditParts.kt"
         )
     }
 }

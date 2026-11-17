@@ -7,8 +7,8 @@ import com.guanglu.caliper.core.database.dao.DeviceDao
 import com.guanglu.caliper.core.database.dao.MeasurementDao
 import com.guanglu.caliper.core.database.entity.Measurement
 import com.guanglu.caliper.core.datastore.SettingsRepository
+import com.guanglu.caliper.core.model.ChannelNamePolicy
 import com.guanglu.caliper.core.model.Units
-import com.guanglu.caliper.core.model.channelDisplayName
 import com.guanglu.caliper.core.model.deviceDisplayName
 import com.guanglu.caliper.core.model.exportValueHighlighted
 import com.guanglu.caliper.core.model.measurementDeviceName
@@ -74,6 +74,7 @@ class ImportExportUseCases(
                 0, 0, parsed.skippedColumns, parsed.parseErrors, 0, parsed.bomRemoved, parsed.fatal
             )
         }
+        val channelNames = ChannelNamePolicy.decode(settings.channelNames)
         val seen = HashSet<String>()
         val entities = mutableListOf<Measurement>()
         var duplicates = 0
@@ -90,9 +91,13 @@ class ImportExportUseCases(
                 parseErrors++
                 return@forEach
             }
-            val (channelNo, legacy) = CsvCodec.channelOf(
-                row["CHANNEL"].orEmpty().ifBlank { "CH1" }
-            )
+            val channelRaw = row["CHANNEL"].orEmpty().ifBlank { "CH1" }
+            val (byName, legacyByName) = ChannelNamePolicy.numberFromName(channelRaw, channelNames)
+            val (channelNo, legacy) = if (byName != 0) {
+                byName to legacyByName
+            } else {
+                CsvCodec.channelOf(channelRaw)
+            }
             val key = "${row["DATE"]}|${row["TIME"]}|$channelNo|$valueUm10"
             if (!seen.add(key)) {
                 duplicates++
@@ -143,13 +148,14 @@ class ImportExportUseCases(
         }.getOrDefault(emptyMap())
         val lower = settings.lowerLimitUm10?.let { Units.formatMm(it, settings.decimals) }.orEmpty()
         val upper = settings.upperLimitUm10?.let { Units.formatMm(it, settings.decimals) }.orEmpty()
+        val channelNames = ChannelNamePolicy.decode(settings.channelNames)
         val csvRows = mutableListOf<Map<String, String>>()
         val sheetRows = mutableListOf<SheetRow>()
         selected.forEach { item ->
             val (date, time) = formatDateTime(item.capturedAt)
             val value = Units.formatMm(item.valueUm10, settings.decimals)
             val device = measurementDeviceName(names, item.deviceMac)
-            val channel = channelDisplayName(item.channelNo)
+            val channel = ChannelNamePolicy.nameOf(channelNames, item.channelNo)
             val highlighted = exportValueHighlighted(
                 item.verdict, item.valueUm10, settings.lowerLimitUm10, settings.upperLimitUm10
             )

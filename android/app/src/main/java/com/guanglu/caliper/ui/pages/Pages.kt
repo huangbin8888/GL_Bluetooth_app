@@ -560,6 +560,9 @@ object Pages {
             webButton("回实时检测") { actions.setPage("P2") },
             webButton("看叠加图表") { actions.setPage("P5") }
         ))
+        col.addView(webBtnRow(
+            webButton("编辑通道名与公差（设置页）") { actions.setPage("P7") }
+        ))
         col.addView(webTiny("第 8 台设备扫描到也不连接并提示上限；7 路 GATT 命令串行队列，重连后各自重新订阅 notify。"))
 
         val job: Job = CoroutineScope(Dispatchers.Main).launch {

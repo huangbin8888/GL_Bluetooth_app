@@ -24,6 +24,7 @@ import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import com.guanglu.caliper.AppContainer
 import com.guanglu.caliper.CaliperApp
+import com.guanglu.caliper.core.model.ChannelNamePolicy
 import com.guanglu.caliper.core.model.BUBBLE_BOTTOM_MARGIN_DP
 import com.guanglu.caliper.core.model.BUBBLE_CORNER_RADIUS_DP
 import com.guanglu.caliper.core.model.BUBBLE_MAX_LINES
@@ -229,11 +230,12 @@ class MainActivity : ComponentActivity(), UiActions {
 
     override fun exportCsv(channelNo: Int?) {
         pendingChannel = channelNo
-        createDocument("text/csv", "measurements.csv", REQ_EXPORT_CSV, "CSV 导出")
+        val title = ChannelNamePolicy.csvFileName(channelNo, container.channelNames())
+        createDocument("text/csv", title, REQ_EXPORT_CSV, "CSV 导出")
     }
 
     override fun exportColoredSheet() {
-        createDocument(ColoredSheetCodec.MIME, "measurements.xlsx", REQ_EXPORT_SHEET, "彩色表格导出")
+        createDocument(ColoredSheetCodec.MIME, "测量数据_超差标红.xlsx", REQ_EXPORT_SHEET, "彩色表格导出")
     }
 
     override fun importCsv() {

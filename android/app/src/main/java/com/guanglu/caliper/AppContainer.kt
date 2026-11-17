@@ -29,6 +29,7 @@ import com.guanglu.caliper.core.model.BEEP_COOLDOWN_MS
 import com.guanglu.caliper.core.model.BT_STATE_OFF
 import com.guanglu.caliper.core.model.BT_STATE_ON
 import com.guanglu.caliper.core.model.BluetoothRecoveryAction
+import com.guanglu.caliper.core.model.ChannelNamePolicy
 import com.guanglu.caliper.core.model.ChannelPalette
 import com.guanglu.caliper.core.model.DeviceNameReport
 import com.guanglu.caliper.core.model.IDLE_POLL_INTERVAL_MS
@@ -171,6 +172,26 @@ class AppContainer(context: Context) {
 
     fun onlineCount(): Int = channelManager.onlineCount()
     fun channelSlots(): Map<Int, String> = channelManager.channelSlots()
+
+    /** 1..7 通道的编辑名；未编辑时逐项回退默认名。 */
+    fun channelNames(): Map<Int, String> = ChannelNamePolicy.decode(settings.channelNames)
+
+    /** 编辑单个通道名：规范化后写回；返回实际保存的名称。 */
+    fun renameChannel(channelNo: Int, name: String): String? {
+        if (channelNo !in 1..ChannelPalette.MAX_CHANNELS) return null
+        val current = channelNames().toMutableMap()
+        val normalized = ChannelNamePolicy.normalize(name, channelNo)
+        current[channelNo] = normalized
+        settings.channelNames = ChannelNamePolicy.encode(current)
+        diagnostics.log("CHANNEL_RENAME CH$channelNo -> $normalized")
+        return normalized
+    }
+
+    /** 恢复全部通道名为默认值。 */
+    fun resetChannelNames() {
+        settings.channelNames = ""
+        diagnostics.log("CHANNEL_RENAME_RESET")
+    }
     fun disconnectAll(): Int {
         cancelAllReconnects()
         stopRecoveryCycle()
