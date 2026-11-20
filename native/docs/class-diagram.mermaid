@@ -1,0 +1,320 @@
+classDiagram
+    direction LR
+
+    %% ============ protocol 层（纯逻辑） ============
+    class Frame {
+        +string Kind
+        +string Unit
+        +string Sign
+        +float64 RawValue
+        +int64 ValueUM
+        +string Raw
+    }
+    class Record {
+        +string Date
+        +string T
+        +int Seq
+        +string Batch
+        +int64 ValueUM
+        +float64 V
+        +string Raw
+        +string RawValue
+        +string RawUnit
+        +string Verdict
+        +string Src
+        +string DeviceMAC
+        +int Ch
+        +int64 TS
+    }
+    class Stats {
+        +int N
+        +float64 MeanUM
+        +int64 MaxUM
+        +int64 MinUM
+        +float64 SDUM
+        +int OK
+        +int OKRate
+    }
+    class FrameBuffer {
+        -string buf
+        +Push(chunk string) Item
+        +Flush() Item
+        +Reset()
+        +Pending() string
+    }
+    class CSVParseResult {
+        +[]string Headers
+        +[]string RawHeaders
+        +[]string Skipped
+        +[]map~string,string~ Rows
+        +bool BOMRemoved
+    }
+    class CSVDefaults {
+        +int ChannelNo
+        +string Date
+        +string Batch
+        +int64 LowerUM
+        +int64 UpperUM
+        +[]string ChannelNames
+        +ResolveTol func
+    }
+    class CSVMeta {
+        +string Date
+        +string Batch
+        +string Nominal
+        +string LowerTol
+        +string UpperTol
+        +int64 LowerUM
+        +int64 UpperUM
+        +[]string ChannelNames
+    }
+    class Protocol {
+        <<package protocol>>
+        +ParseFrame(raw string) Frame
+        +ShouldDrop(prev, cur, maxDeltaUM, maxMS) bool
+        +Verdict(um, lowerUM, upperUM int64) string
+        +FriendlyUnit(raw string) string
+        +CalcStats(recs, lowerUM, upperUM int64) Stats
+        +CalcStatsWithResolver(recs, resolve TolResolver) Stats
+        +CsvParse(text string) CSVParseResult
+        +CsvToRecords(parsed, defaults) pair
+        +RecordsToCsv(recs, meta) string
+    }
+    class CSVHeadersCN {
+        <<constant>>
+        +string[] Headers
+    }
+
+    %% ============ core 层（纯逻辑） ============
+    class ChannelConfig {
+        +string Name
+        +bool UseTol
+        +float64 LowerMM
+        +float64 UpperMM
+    }
+    class Settings {
+        +string Unit
+        +int Digits
+        +float64 NominalMM
+        +float64 LowerTolMM
+        +float64 UpperTolMM
+        +int64 DebounceUM
+        +int64 MaxMS
+        +int MaxCh
+        +bool AutoEmit
+        +string Terminator
+        +string Batch
+        +string NamePrefix
+        +ChannelConfig[] Channels
+        +bool AlertOnBad
+        +bool AutoReconnect
+        +bool IdleDisconnect
+        +int IdleMinutes
+        +string LastDeviceAddr
+        +lowerUM() int64
+        +upperUM() int64
+        +ChannelBounds(ch int) pair
+        +ChannelName(ch int) string
+        +Normalize()
+    }
+    class App {
+        -Settings Settings
+        -[]Record Records
+        -FrameBuffer fb
+        -map~int,DropKey~ last
+        -int channel
+        -LinkMode mode
+        +OnChange(fn func)
+        +FeedRaw(chunk string)
+        +FeedHIDToken(token string) bool
+        +FeedDemoValue(mm float64, ch int)
+        +commit(fr Frame, ch int, src string)
+        +RecordsSnapshot() Record
+        +Stats() Stats
+        +ImportCsv(path string) triple
+        +ExportCsv(path, scope string) int
+        +SetSettings(s Settings)
+        +GetSettings() Settings
+    }
+    class Change {
+        +string Kind
+        +string Text
+    }
+    class ChartKind {
+        <<enum>>
+        line
+        bar
+    }
+    class ChartPoint {
+        +int Index
+        +int64 TS
+        +string TimeLabel
+        +float64 ValueMM
+        +float64 LowerMM
+        +float64 UpperMM
+        +float64 MeanMM
+        +bool Out
+        +int Ch
+        +string ChName
+    }
+    class ChartData {
+        +ChartKind Kind
+        +[]ChartPoint Points
+        +int Digits
+        +string UnitLabel
+        +string ChLabel
+    }
+    class AxisRange {
+        +float64 Min
+        +float64 Max
+        +[]float64 Ticks
+    }
+    class ChartMath {
+        <<package core>>
+        +BuildChartData(recs, settings, filter) ChartData
+        +ComputeYRange(pts) AxisRange
+        +FitY(v, range, topPx, bottomPx) int
+        +FitX(i, n, leftPx, rightPx) int
+    }
+    class LinkWatchdog {
+        <<package core>>
+        +ShouldAutoReconnect(enabled, addr string) bool
+        +ShouldIdleDisconnect(enabled bool, lastTS, now int64, minutes int) bool
+    }
+
+    %% ============ ui 层（绑定与绘制） ============
+    class DeviceBridge {
+        <<interface>>
+        +HIDStart() error
+        +HIDStop()
+        +HIDEnabled() bool
+        +HIDSetTerminator(t string)
+        +BLEAvailable() bool
+        +BLEScan() DeviceView
+        +BLEConnect(addr string) error
+        +BLEDisconnect()
+        +BLEConnected() bool
+    }
+    class DeviceView {
+        +string Address
+        +string Name
+        +int16 RSSI
+    }
+    class RecordModel {
+        +int digits
+        +string unit
+        +string filtered
+        +SetDisplay(digits, unit, filter, sorted)
+        +RowCount() int
+        +Value(row, col int) interface
+        +StyleCell(style CellStyle)
+    }
+    class UI {
+        -App app
+        -DeviceBridge bridge
+        -RecordModel model
+        -CustomWidget chartWidget
+        -ChartData chartData
+        -ChartKind chartKind
+        -string chartFilter
+        +Run() error
+        +onChange(c Change)
+        +paintChart(canvas, bounds) error
+        +refreshChart()
+        +exportChartPNG() error
+        +maybeAlertOnBad(rec Record)
+        +onSaveSettings()
+        +onResetSettings()
+        +refreshAnalysis()
+    }
+    class ChartExport {
+        <<package ui>>
+        +NewBitmap(size) Bitmap
+        +NewCanvasFromImage(img) Canvas
+        +ToImage() imageRGBA
+        +png.Encode(w, img) error
+    }
+    class Canvas {
+        <<walk>>
+        +DrawLinePixels(pen, from, to)
+        +DrawPolylinePixels(pen, points)
+        +DrawRectanglePixels(pen, bounds)
+        +FillRectanglePixels(brush, bounds)
+        +DrawTextPixels(text, font, color, bounds, format)
+        +DrawEllipsePixels(pen, bounds)
+        +HDC() HDC
+    }
+    class Alert {
+        <<package ui>>
+        +windows.MessageBeep()
+        +读数标签闪红()
+    }
+
+    %% ============ main / 硬件 ============
+    class bridge {
+        -hid Capture
+        -ble Client
+        -App app
+        -UI ui
+        +HIDSetTerminator(t string)
+        +BLEScan() DeviceView
+        +BLEConnect(addr string) error
+        +BLEAutoConnect(addr string) error
+        +NoteConnected(addr string)
+        +BLEDisconnect()
+    }
+    class BLEClient {
+        -Adapter adapter
+        -string namePrefix
+        -bool connected
+        +Scan(durationMs int) DeviceInfo
+        +Connect(addr string) error
+        +SetNamePrefix(p string)
+        +Write(cmd string) error
+        +Disconnect()
+        +IsConnected() bool
+    }
+    class HIDCapture {
+        -string terminator
+        -bool enabled
+        +Start() error
+        +Stop()
+        +SetTerminator(t string)
+        +ClearBuffer()
+    }
+
+    %% ============ 关系 ============
+    Protocol ..> Frame : 解析产出
+    Protocol ..> Record : 判定 / CSV 转换
+    Protocol ..> CSVParseResult : CsvParse
+    Protocol ..> CSVMeta : RecordsToCsv
+    Protocol ..> CSVDefaults : CsvToRecords
+    CSVHeadersCN ..> Protocol : 导出表头 + 别名回导入
+
+    FrameBuffer "1" --> "1" Frame : 组装
+    App "1" *-- "1" Settings
+    App "1" *-- "1" FrameBuffer
+    App "1" *-- "0..*" Record
+    App "1" --> "0..*" Change : emit
+    Settings "1" *-- "7" ChannelConfig
+    Settings ..> Protocol : ChannelBounds → Verdict
+    Settings ..> ChartMath : BuildChartData 输入
+
+    ChartMath ..> ChartData : 产出
+    ChartMath ..> AxisRange : ComputeYRange
+    ChartData "1" *-- "0..*" ChartPoint
+    ChartData --> ChartKind
+
+    UI "1" *-- "1" RecordModel
+    UI "1" *-- "1" ChartData
+    UI "1" --> "1" DeviceBridge : 使用
+    UI ..> Canvas : paintChart
+    UI ..> ChartExport : exportChartPNG
+    UI ..> Alert : maybeAlertOnBad
+    UI ..> LinkWatchdog : 启动/看门狗
+    DeviceBridge <|.. bridge
+    bridge "1" --> "1" BLEClient
+    bridge "1" --> "0..1" HIDCapture
+    bridge "1" --> "1" App
+    HIDCapture --> App : FeedHIDToken
+    BLEClient --> App : FeedRaw

@@ -1,0 +1,349 @@
+//go:build windows
+
+package ui
+
+import (
+	"fmt"
+	"strconv"
+
+	"github.com/lxn/walk"
+	. "github.com/lxn/walk/declarative"
+	"glcaliper/protocol"
+)
+
+// pageConnect: BLE scan/connect + HID guidance + environment info.
+func (u *UI) pageConnect() TabPage {
+	return TabPage{
+		Title:  "连接卡尺",
+		Layout: VBox{Margins: Margins{12, 12, 12, 12}, Spacing: 10},
+		Children: []Widget{
+			Composite{
+				Layout:     VBox{Margins: Margins{12, 10, 12, 10}, Spacing: 6},
+				Background: SolidColorBrush{Color: colorPrimarySoft},
+				Children: []Widget{
+					Label{Text: "链路模式", Font: Font{PointSize: 10, Bold: true}, TextColor: colorSub},
+					Label{AssignTo: &u.lblEnvDetail, Text: "检测中…", Font: Font{PointSize: 10}},
+				},
+			},
+			GroupBox{
+				Title:  "BLE 直连（Win10+，需蓝牙 LE）",
+				Layout: VBox{Margins: Margins{10, 8, 10, 8}, Spacing: 8},
+				Children: []Widget{
+					Composite{
+						Layout: HBox{Spacing: 8},
+						Children: []Widget{
+							PushButton{AssignTo: &u.btnScan, Text: "扫描设备", OnClicked: u.onScan, MinSize: Size{130, 32}},
+							PushButton{AssignTo: &u.btnConnect, Text: "连接选中", OnClicked: u.onConnect, MinSize: Size{130, 32}},
+							PushButton{AssignTo: &u.btnDisconnect, Text: "断开", OnClicked: u.onDisconnect},
+						},
+					},
+					ListBox{AssignTo: &u.lstDevices, Model: u.deviceList,
+						MinSize: Size{0, 150}},
+					Label{AssignTo: &u.lblDevices, Text: "长按卡尺 data 键 3 秒至闪 OK，再扫描；选中后点“连接选中”。", TextColor: colorSub},
+				},
+			},
+			GroupBox{
+				Title:  "HID 键盘捕获（Win7/Win10/11 通用，推荐）",
+				Layout: VBox{Margins: Margins{10, 8, 10, 8}, Spacing: 6},
+				Children: []Widget{
+					Label{Text: "把卡尺通过蓝牙配对为“键盘”设备，到“实时检测”页开启全局捕获，任意界面下读数都会自动录入——这是网页/Electron 做不到的原生能力。"},
+					PushButton{Text: "前往实时检测页", OnClicked: func() {
+						u.tabWidget.SetCurrentIndex(0)
+					}},
+				},
+			},
+		},
+	}
+}
+
+func (u *UI) onScan() {
+	if u.bridge == nil {
+		return
+	}
+	if !u.bridge.BLEAvailable() {
+		u.lblDevices.SetText("此系统不支持 BLE（Win7 无 WinRT 蓝牙 LE）。请改用 HID 键盘捕获模式——功能完全一致且可实测。")
+		u.setStatus("BLE 不可用，请改用 HID 模式")
+		return
+	}
+	u.btnScan.SetEnabled(false)
+	u.setStatus("正在扫描 GL-BLE# 设备…")
+	go func() {
+		devs, err := u.bridge.BLEScan()
+		u.main.Synchronize(func() {
+			u.btnScan.SetEnabled(true)
+			if err != nil {
+				u.lblDevices.SetText("扫描失败：" + err.Error())
+				u.setStatus("扫描失败")
+				return
+			}
+			u.deviceList = make([]string, len(devs))
+			u.deviceAddrs = make([]string, len(devs))
+			for i, d := range devs {
+				u.deviceList[i] = fmt.Sprintf("%s  (%s)  %d dBm", d.Name, shortAddr(d.Address), d.RSSI)
+				u.deviceAddrs[i] = d.Address
+			}
+			u.lstDevices.SetModel(u.deviceList)
+			if len(devs) == 0 {
+				u.lblDevices.SetText("未发现 GL-BLE# 设备。请确认卡尺在广播（长按 data 键）。")
+				u.setStatus("未发现设备")
+			} else {
+				u.lblDevices.SetText(fmt.Sprintf("发现 %d 台设备，双击或点“连接选中”", len(devs)))
+				u.setStatus(fmt.Sprintf("发现 %d 台设备", len(devs)))
+			}
+		})
+	}()
+}
+
+func (u *UI) onConnect() {
+	if u.bridge == nil || u.lstDevices == nil {
+		return
+	}
+	idx := u.lstDevices.CurrentIndex()
+	if idx < 0 || idx >= len(u.deviceAddrs) {
+		info(u.main, "连接", "请先扫描并选中一台设备")
+		return
+	}
+	addr := u.deviceAddrs[idx]
+	u.setStatus("正在连接 " + addr + " …")
+	go func() {
+		err := u.bridge.BLEConnect(addr)
+		u.main.Synchronize(func() {
+			if err != nil {
+				errBox(u.main, "连接失败", err.Error())
+				u.setStatus("连接失败")
+				return
+			}
+			u.setStatus("已连接 " + addr)
+		})
+	}()
+}
+
+func (u *UI) onDisconnect() {
+	if u.bridge == nil {
+		return
+	}
+	u.bridge.BLEDisconnect()
+	u.setStatus("已断开 BLE")
+}
+
+// pageAnalysis: statistics (7 items kept in place) + self-drawn chart.
+func (u *UI) pageAnalysis() TabPage {
+	return TabPage{
+		Title:  "数据分析",
+		Layout: VBox{Margins: Margins{14, 14, 14, 14}, Spacing: 10},
+		Children: []Widget{
+			Label{Text: "实时统计（基于当前公差）", Font: Font{PointSize: 12, Bold: true}},
+			Composite{
+				Layout:     Grid{Margins: Margins{14, 12, 14, 12}, Spacing: 10, Columns: 2},
+				Background: SolidColorBrush{Color: colorWhite},
+				Children: []Widget{
+					Label{Text: "总数", TextColor: colorSub}, Label{AssignTo: &u.anTotal, Text: "0", Font: Font{PointSize: 11, Bold: true}},
+					Label{Text: "合格数", TextColor: colorSub}, Label{AssignTo: &u.anOK, Text: "0", Font: Font{PointSize: 11, Bold: true}},
+					Label{Text: "合格率", TextColor: colorSub}, Label{AssignTo: &u.anRate, Text: "0%", Font: Font{PointSize: 11, Bold: true}},
+					Label{Text: "均值", TextColor: colorSub}, Label{AssignTo: &u.anMean, Text: "—", Font: Font{PointSize: 11, Bold: true}},
+					Label{Text: "最大值", TextColor: colorSub}, Label{AssignTo: &u.anMax, Text: "—", Font: Font{PointSize: 11, Bold: true}},
+					Label{Text: "最小值", TextColor: colorSub}, Label{AssignTo: &u.anMin, Text: "—", Font: Font{PointSize: 11, Bold: true}},
+					Label{Text: "标准差", TextColor: colorSub}, Label{AssignTo: &u.anSD, Text: "—", Font: Font{PointSize: 11, Bold: true}},
+				},
+			},
+			// ---- chart toolbar (new controls only, nothing removed) ----
+			Composite{
+				Layout: HBox{Spacing: 8},
+				Children: []Widget{
+					Label{Text: "趋势图", Font: Font{PointSize: 11, Bold: true}},
+					PushButton{AssignTo: &u.btnChartKind, Text: "切换为柱状图", OnClicked: u.onChartKindToggle, MinSize: Size{120, 28}},
+					Label{Text: "通道", TextColor: colorSub},
+					ComboBox{AssignTo: &u.cmbChartFilter, Editable: false, Value: int(0), Model: filterDisplayNames(u.app.GetSettings()),
+						OnCurrentIndexChanged: u.onChartFilterChanged},
+					HSpacer{},
+					PushButton{Text: "导出 PNG…", OnClicked: u.onExportChartPNG, MinSize: Size{110, 28}},
+				},
+			},
+			Composite{
+				Layout:        VBox{MarginsZero: true},
+				Background:    SolidColorBrush{Color: colorWhite},
+				MinSize:       Size{0, 240},
+				StretchFactor: 1,
+				Children: []Widget{
+					CustomWidget{
+						AssignTo:            &u.chartWidget,
+						PaintMode:           PaintBuffered,
+						InvalidatesOnResize: true,
+						MinSize:             Size{0, 240},
+						StretchFactor:       1,
+						// walk's PaintFunc receives updateBounds in 96-DPI units,
+						// relative to this widget's client area. It is the correct
+						// drawing extent. Never use canvas.Bounds() here: in
+						// PaintBuffered mode the canvas is an in-memory bitmap and
+						// canvas.Bounds() reports the full device resolution
+						// (e.g. 1920x1080), so the chart would be laid out far
+						// larger than the widget and its bottom (time axis, bar
+						// bases) would be clipped by the widget edge.
+						Paint: func(canvas *walk.Canvas, updateBounds walk.Rectangle) error {
+							return u.paintChart(canvas, updateBounds)
+						},
+					},
+				},
+			},
+		},
+	}
+}
+
+func (u *UI) onExportChartPNG() {
+	if err := u.exportChartPNG(); err != nil {
+		errBox(u.main, "图表导出失败", err.Error())
+	}
+}
+
+// pageExport: CSV export with scope selection.
+func (u *UI) pageExport() TabPage {
+	return TabPage{
+		Title:  "导出到本地",
+		Layout: VBox{Margins: Margins{14, 14, 14, 14}, Spacing: 12},
+		Children: []Widget{
+			Label{Text: "导出当前记录为 CSV（UTF-8 BOM，Excel 直接打开）", Font: Font{PointSize: 12, Bold: true}},
+			Label{Text: "中文 7 列：日期 / 时间 / 设备名称 / 测量值 / 公差上限 / 公差下限 / 通道名称（绝对 mm）", TextColor: colorSub},
+			Composite{
+				Layout: HBox{Spacing: 10},
+				Children: []Widget{
+					Label{Text: "范围", TextColor: colorSub},
+					ComboBox{AssignTo: &u.exportScope, Editable: false, Value: int(0), Model: filterDisplayNames(u.app.GetSettings())},
+					PushButton{Text: "选择位置并导出…", OnClicked: u.onExportCsv, MinSize: Size{180, 32}},
+				},
+			},
+			Label{AssignTo: &u.exportResult, Text: "", TextColor: colorSub},
+			VSpacer{},
+		},
+	}
+}
+
+func (u *UI) onExportCsv() {
+	scope := "all"
+	if u.exportScope != nil && u.exportScope.CurrentIndex() > 0 {
+		scope = fmt.Sprintf("CH%d", u.exportScope.CurrentIndex())
+	}
+	dlg := walk.FileDialog{
+		Title:    "导出 CSV",
+		Filter:   "CSV 文件 (*.csv)|*.csv",
+		FilePath: protocolFileName("csv"),
+	}
+	if ok, err := dlg.ShowSave(u.main); err != nil || !ok {
+		return
+	}
+	n, err := u.app.ExportCsv(dlg.FilePath, scope)
+	if err != nil {
+		errBox(u.main, "导出失败", err.Error())
+		return
+	}
+	u.exportResult.SetText(fmt.Sprintf("已导出 %d 条到：\n%s", n, dlg.FilePath))
+	u.setStatus(fmt.Sprintf("已导出 %d 条", n))
+}
+
+// channelSettingWidgets builds the 7-row channel name/tolerance grid.
+func (u *UI) channelSettingWidgets() []Widget {
+	widgets := []Widget{
+		Label{Text: "通道", Font: Font{Bold: true}},
+		Label{Text: "自定义名称", Font: Font{Bold: true}},
+		Label{Text: "启用独立公差", Font: Font{Bold: true}},
+		Label{Text: "下限 (mm)", Font: Font{Bold: true}},
+		Label{Text: "上限 (mm)", Font: Font{Bold: true}},
+	}
+	for i := 0; i < 7; i++ {
+		widgets = append(widgets,
+			Label{Text: fmt.Sprintf("CH%d", i+1)},
+			LineEdit{AssignTo: &u.edChName[i]},
+			CheckBox{AssignTo: &u.ckChUseTol[i], Text: ""},
+			LineEdit{AssignTo: &u.edChLower[i]},
+			LineEdit{AssignTo: &u.edChUpper[i]},
+		)
+	}
+	return widgets
+}
+
+// pageSettings: tolerance / debounce / channel / unit + new option groups.
+func (u *UI) pageSettings() TabPage {
+	return TabPage{
+		Title:  "设置",
+		Layout: VBox{Margins: Margins{14, 14, 14, 14}, Spacing: 10},
+		Children: []Widget{
+			GroupBox{
+				Title:  "判定公差（全局，未启用独立公差时使用）",
+				Layout: Grid{Margins: Margins{12, 10, 12, 10}, Spacing: 8, Columns: 2},
+				Children: []Widget{
+					Label{Text: "公称值 (mm)"}, LineEdit{AssignTo: &u.edNominal},
+					Label{Text: "下偏差 (mm)"}, LineEdit{AssignTo: &u.edLower},
+					Label{Text: "上偏差 (mm)"}, LineEdit{AssignTo: &u.edUpper},
+				},
+			},
+			GroupBox{
+				Title:  "通道名称与独立公差（绝对 mm）",
+				Layout: Grid{Margins: Margins{12, 10, 12, 10}, Spacing: 6, Columns: 5},
+				Children: u.channelSettingWidgets(),
+			},
+			GroupBox{
+				Title:  "采集与显示",
+				Layout: Grid{Margins: Margins{12, 10, 12, 10}, Spacing: 8, Columns: 2},
+				Children: []Widget{
+					Label{Text: "显示单位"}, ComboBox{AssignTo: &u.cmbUnit, Editable: false, Value: int(0), Model: []string{"mm", "inch"}},
+					Label{Text: "小数位"}, LineEdit{AssignTo: &u.edDigits},
+					Label{Text: "去抖阈值 (µm)"}, LineEdit{AssignTo: &u.edDebounce},
+					Label{Text: "HID 终止符"}, ComboBox{AssignTo: &u.cmbTerm, Editable: false, Value: int(0), Model: []string{"ENTER（回车）", "TAB（制表）"}},
+					Label{Text: "批次号"}, LineEdit{AssignTo: &u.edBatch},
+				},
+			},
+			GroupBox{
+				Title:  "提醒与链路",
+				Layout: Grid{Margins: Margins{12, 10, 12, 10}, Spacing: 8, Columns: 2},
+				Children: []Widget{
+					Label{Text: "超差蜂鸣与界面提醒（演示模式跳过）"}, CheckBox{AssignTo: &u.ckAlertOnBad, Text: ""},
+					Label{Text: "启动时自动重连上次设备（仅 BLE）"}, CheckBox{AssignTo: &u.ckAutoReconnect, Text: ""},
+					Label{Text: "空闲自动断开 BLE"}, CheckBox{AssignTo: &u.ckIdleDisconnect, Text: ""},
+					Label{Text: "空闲分钟数"}, LineEdit{AssignTo: &u.edIdleMinutes},
+				},
+			},
+			GroupBox{
+				Title:  "设备登记",
+				Layout: Grid{Margins: Margins{12, 10, 12, 10}, Spacing: 8, Columns: 2},
+				Children: []Widget{
+					Label{Text: "广播名前缀（用于 BLE 扫描过滤）"}, LineEdit{AssignTo: &u.edNamePrefix},
+				},
+			},
+			Composite{
+				Layout: HBox{Spacing: 10},
+				Children: []Widget{
+					PushButton{Text: "保存设置", OnClicked: u.onSaveSettings, MinSize: Size{130, 32}},
+					PushButton{Text: "恢复默认", OnClicked: u.onResetSettings},
+				},
+			},
+			Label{Text: "设置保存在本地配置文件，重启后保留。", TextColor: colorSub},
+			VSpacer{},
+		},
+	}
+}
+
+func shortAddr(addr string) string {
+	if len(addr) > 17 {
+		return addr[:8] + "…" + addr[len(addr)-6:]
+	}
+	return addr
+}
+
+func protocolFileName(ext string) string {
+	return protocol.FileName("BATCH", protocol.NowStamp(), "ALL", ext)
+}
+
+func parseFloat(s string, def float64) float64 {
+	v, err := strconv.ParseFloat(s, 64)
+	if err != nil {
+		return def
+	}
+	return v
+}
+
+func parseInt(s string, def int) int {
+	v, err := strconv.Atoi(s)
+	if err != nil {
+		return def
+	}
+	return v
+}

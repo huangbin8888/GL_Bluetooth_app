@@ -1,0 +1,149 @@
+sequenceDiagram
+    autonumber
+    participant Main as main.go
+    participant B as bridge
+    participant BLE as ble.Client
+    participant HID as hid.Capture
+    participant A as core.App
+    participant S as core.Settings
+    participant P as protocol
+    participant W as core.LinkWatchdog
+    participant U as ui.UI
+    participant M as ui.RecordModel
+    participant C as walk.Canvas
+    participant F as glcaliper-settings.json
+
+    %% ---------- 0. 启动装配 ----------
+    rect rgb(240,248,255)
+    Note over Main,F: 阶段 0：启动装配与配置归一化
+    Main->>U: LoadSettings()
+    U->>F: os.ReadFile
+    F-->>U: JSON（旧文件可能缺新字段）
+    U->>S: json.Unmarshal → Settings.Normalize()
+    S->>S: 缺失字段取 Default：NamePrefix=GL-BLE#, IdleMinutes=5,<br/>Channels[i].UseTol=false, AlertOnBad=false
+    U-->>Main: Settings（已归一化）
+    Main->>A: SetSettings(S)
+    Main->>B: 注入 SetNamePrefix(S.NamePrefix), HIDSetTerminator(S.Terminator)
+    opt S.AutoReconnect && S.LastDeviceAddr 非空 && BLEAvailable
+        Main->>B: go BLEAutoConnect(S.LastDeviceAddr)
+        B->>BLE: Connect(addr)（沿用 8s 超时，best-effort）
+        BLE-->>B: 成功/失败
+        alt 成功
+            B->>A: SetStatus("自动连接成功")
+        else 失败
+            B->>A: SetStatus("自动连接失败，可手动连接")
+        end
+    end
+    Main->>U: Run()
+    U->>U: 构建 5 个 Tab（分析页含 CustomWidget 图表）
+    end
+
+    %% ---------- 1. 数据进链路 ----------
+    rect rgb(245,255,245)
+    Note over HID,A,U: 阶段 1：feed → FrameBuffer → parse → 去抖 → 落库（链路不变，仅判定取通道公差）
+    alt BLE 通知
+        BLE->>A: onData(payload) → FeedRaw
+    else HID 键盘
+        HID->>A: onToken(token) → FeedHIDToken
+    else 演示模式
+        Main->>A: FeedDemoValue(mm, ch) （600ms ticker）
+    end
+    A->>P: FrameBuffer.Push → ParseFrame → ShouldDrop
+    alt 被去抖丢弃
+        P-->>A: nil → 直接返回，无变更
+    else 有效帧
+        P-->>A: Frame{Unit m|i, ValueUM}
+        A->>S: ChannelBounds(ch) → (lowerUM, upperUM)
+        S-->>A: 通道公差（未启用则回退全局 Nominal±Tol）
+        A->>P: Verdict(ValueUM, lowerUM, upperUM)
+        P-->>A: "合格" | "超差"
+        A->>A: 追加 Record{Verdict, RawUnit, Src, Ch, TS} → seq++
+        A->>U: emit(Change{kind="record"})
+    end
+    end
+
+    %% ---------- 2. UI 刷新 + 单位 + 提醒 ----------
+    rect rgb(255,250,240)
+    Note over U,C: 阶段 2：UI 刷新（Synchronize 内）
+    U->>U: main.Synchronize(onChange)
+    U->>M: PublishRowsReset
+    M->>P: FriendlyUnit(r.RawUnit) → "mm"|"inch"
+    M-->>C: 表格第 4 列显示友好单位（仍 6 列）
+    U->>U: refreshReading / refreshCountStats
+    U->>A: Stats()
+    A->>P: CalcStatsWithResolver(recs, S.ChannelBounds)
+    P-->>A: Stats（7 项，OK/OKRate 按各记录通道公差）
+    A-->>U: Stats
+    U->>A: RecordsSnapshot
+    U->>S: BuildChartData 需要 Settings（通道名/公差）
+    U->>U: refreshChart → BuildChartData(recs, S, chartFilter)
+    U->>C: chartWidget.Invalidate() → WM_PAINT
+    C->>U: paintChart(canvas, bounds)
+    U->>C: 网格 / 折线或柱 / 公差虚线(PenDash,琥珀) / 均值虚线 / 右Y轴mm刻度 / 底X轴时间 / 超差红点 / 图例
+    opt S.AlertOnBad && 最新记录 Verdict=超差 && Src≠DEMO
+        U->>U: maybeAlertOnBad → windows.MessageBeep + 读数标签警示色
+    end
+    end
+
+    %% ---------- 3. PNG 导出 ----------
+    rect rgb(245,240,255)
+    Note over U,C: 阶段 3：PNG 导出（离屏 Canvas，与屏幕复用 paintChart）
+    U->>U: 用户点「导出 PNG」→ FileDialog.ShowSave
+    U->>C: NewBitmap(Size{1200,700})
+    C-->>U: *Bitmap
+    U->>C: NewCanvasFromImage(bmp) → 离屏 Canvas
+    U->>C: FillRectangle(白底) → paintChart(canvas, bounds)
+    U->>C: bmp.ToImage() → *image.RGBA
+    U->>U: os.Create(path) → png.Encode(w, rgba)
+    U->>U: 状态栏提示导出成功；失败静默降级不崩溃
+    end
+
+    %% ---------- 4. CSV 导出/导入闭环 ----------
+    rect rgb(255,245,240)
+    Note over U,P: 阶段 4：CSV 中文 7 列导出 → 回导入
+    U->>A: ExportCsv(path, scope)
+    A->>A: RecordsSnapshot + scope 过滤
+    A->>S: ChannelName(ch) / ChannelBounds(ch)
+    A->>P: RecordsToCsv(recs, meta{ChannelNames, LowerUM, UpperUM})
+    P->>P: 表头 CSVHeadersCN = 日期,时间,设备名称,测量值,公差上限,公差下限,通道名称
+    P->>P: 每行按 7 列写值；末尾 "\ufeff"+CRLF
+    P-->>A: CSV 文本
+    A->>A: os.WriteFile
+    U->>A: ImportCsv(path)
+    A->>P: CsvParse(text)
+    P->>P: 去 BOM；中文表头经 aliases 映射<br/>设备名称→DEVICE_MAC, 公差上限→UPPER_TOL,<br/>公差下限→LOWER_TOL, 通道名称→CHANNEL
+    P-->>A: Rows（规范键）
+    A->>P: CsvToRecords(parsed, CSVDefaults{ChannelNames, ResolveTol:S.ChannelBounds})
+    P->>P: 通道名反查→ch；resolver→Verdict；date|time|ch|um 去重
+    P-->>A: records
+    A->>U: emit(reset) → 表格/统计/图表刷新
+    end
+
+    %% ---------- 5. 设置保存 ----------
+    rect rgb(240,255,250)
+    Note over U,F: 阶段 5：设置页保存 → 判定链路生效
+    U->>U: onSaveSettings 读 7 行通道名/公差 + 提醒/重连/空闲开关 + 分钟数 + 前缀
+    U->>A: SetSettings(S')
+    U->>B: HIDSetTerminator(S'.Terminator), SetNamePrefix(S'.NamePrefix)
+    U->>F: saveSettingsFile(S')（UTF-8 JSON，新字段带 tag）
+    U->>M: SetDisplay + PublishRowsReset
+    U->>C: refreshChart + refreshCountStats
+    Note over A,C: 此后 commit / Stats / 图表三处统一取 S'.ChannelBounds
+    end
+
+    %% ---------- 6. 空闲断连看门狗 ----------
+    rect rgb(255,240,240)
+    Note over Main,BLE,W: 阶段 6：空闲断连（独立 1s ticker）
+    loop 每 1 秒
+        Main->>B: BLEConnected() / 最后数据时间 lastTS
+        B-->>Main: connected, lastTS
+        Main->>W: ShouldIdleDisconnect(S.IdleDisconnect && connected, lastTS, now, S.IdleMinutes)
+        W-->>Main: true / false
+        alt true 且非 HID/DEMO
+            Main->>BLE: Disconnect()
+            BLE-->>A: SetStatus("空闲 N 分钟，已断开 BLE")
+        else 关闭或阈值非法
+            Main->>Main: no-op（HID 无连接态、DEMO 由用户显式停止）
+        end
+    end
+    end
