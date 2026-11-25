@@ -10,8 +10,8 @@ import "testing"
 // cells) or invalidate beyond the client area (the old whole-table flicker).
 func TestRedrawRangeClampsToVisibleRows(t *testing.T) {
 	cases := []struct {
-		name            string
-		top, perPage, n int
+		name                string
+		top, perPage, n     int
 		wantFirst, wantLast int
 	}{
 		{"empty table", 0, 20, 0, 0, -1},

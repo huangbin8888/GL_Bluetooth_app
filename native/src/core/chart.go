@@ -92,7 +92,7 @@ func BuildChartData(recs []protocol.Record, s Settings, filter string) ChartData
 			ValueMM: protocol.ToMM(r.ValueUM),
 			LowerMM: loMM, UpperMM: hiMM, MeanMM: mean,
 			Out: protocol.Verdict(r.ValueUM, loUM, hiUM) == "超差",
-			Ch: r.Ch, ChName: s.ChannelName(r.Ch),
+			Ch:  r.Ch, ChName: s.ChannelName(r.Ch),
 		})
 	}
 	data.Points = points

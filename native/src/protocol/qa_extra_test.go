@@ -33,8 +33,10 @@ func TestQA_LegacyEnglish16ColImport(t *testing.T) {
 	}
 }
 
-// TestQA_LegacyEnglish16ColLegacyChannel keeps a CH8 (legacy) row from a real
-// English header row and asserts it is retained, not clamped or dropped.
+// TestQA_LegacyEnglish16ColLegacyChannel keeps a CH8 row from a real English
+// header row and asserts it is retained, not clamped or dropped. CH8 was
+// legacy when the palette held 7 channels; with the 20-channel expansion it
+// is a normal channel, so Legacy must now be false while the row survives.
 func TestQA_LegacyEnglish16ColLegacyChannel(t *testing.T) {
 	legacy := "\ufeff" + strings.Join(CSVHeaders, ",") + "\r\n" +
 		"2025-05-02,10:00:00,8,B1,ITEM,10.000,-0.050,0.050," +
@@ -47,8 +49,8 @@ func TestQA_LegacyEnglish16ColLegacyChannel(t *testing.T) {
 	if bad != 0 || len(recs) != 1 {
 		t.Fatalf("legacy import bad=%d n=%d", bad, len(recs))
 	}
-	if recs[0].Ch != 8 || !recs[0].Legacy {
-		t.Errorf("legacy channel = %d legacy=%v, want 8/true", recs[0].Ch, recs[0].Legacy)
+	if recs[0].Ch != 8 || recs[0].Legacy {
+		t.Errorf("channel = %d legacy=%v, want 8/false (CH8 is normal at 20 channels)", recs[0].Ch, recs[0].Legacy)
 	}
 }
 

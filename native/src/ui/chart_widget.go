@@ -12,8 +12,8 @@ import (
 // chartLayout holds the pixel geometry used by both screen painting and the
 // off-screen PNG export, keeping the two outputs identical.
 type chartLayout struct {
-	bounds                    walk.Rectangle
-	left, right, top, bottom  int
+	bounds                     walk.Rectangle
+	left, right, top, bottom   int
 	plotL, plotR, plotT, plotB int
 }
 
@@ -193,11 +193,11 @@ func (u *UI) paintChart(canvas *walk.Canvas, bounds walk.Rectangle) error {
 		label := strconv.FormatFloat(tick, 'f', data.Digits, 64)
 		_ = canvas.DrawText(label, fontTick, walk.RGB(chSubR, chSubG, chSubB),
 			walk.Rectangle{X: l.plotR + 5, Y: y - 7, Width: l.right - 9, Height: 14},
-			walk.TextRight | walk.TextSingleLine | walk.TextVCenter)
+			walk.TextRight|walk.TextSingleLine|walk.TextVCenter)
 	}
 	_ = canvas.DrawText("mm", fontTick, walk.RGB(chSubR, chSubG, chSubB),
 		walk.Rectangle{X: l.plotR + 5, Y: l.plotT - 18, Width: l.right - 9, Height: 14},
-		walk.TextRight | walk.TextSingleLine)
+		walk.TextRight|walk.TextSingleLine)
 	_ = canvas.DrawRectangle(axisPen, plotRect)
 
 	n := len(data.Points)
@@ -367,7 +367,7 @@ func (u *UI) paintChart(canvas *walk.Canvas, bounds walk.Rectangle) error {
 		x := core.FitX(i, n, l.plotL, l.plotR)
 		_ = canvas.DrawText(data.Points[i].TimeLabel, fontTick, walk.RGB(chSubR, chSubG, chSubB),
 			walk.Rectangle{X: x - 30, Y: l.plotB + 4, Width: 60, Height: 14},
-			walk.TextCenter | walk.TextSingleLine)
+			walk.TextCenter|walk.TextSingleLine)
 	}
 	return nil
 }

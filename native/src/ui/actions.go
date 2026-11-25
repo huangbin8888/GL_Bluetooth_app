@@ -4,14 +4,24 @@ package ui
 
 import (
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/lxn/walk"
 	"glcaliper/core"
+	"glcaliper/protocol"
 )
 
 // afterCreate runs once the window controls exist.
 func (u *UI) afterCreate() {
+	// Keep the whole window (incl. title-bar buttons) on screen on small/hi-DPI
+	// displays. The subclass caps walk's layout-driven min/max track size to
+	// the work area, then we center + clamp the initial rectangle.
+	if u.main != nil {
+		installWindowFit(u.main.Handle())
+		fitWindowToWorkArea(u.main.Handle())
+	}
+
 	// 表格样式器：判定色块 / 来源分色 / 等宽数值
 	if u.tableView != nil && u.model != nil {
 		u.tableView.SetCellStyler(u.model)
@@ -61,6 +71,20 @@ func (u *UI) afterCreate() {
 	// HID terminator sync
 	if u.bridge != nil {
 		u.bridge.HIDSetTerminator(s.Terminator)
+	}
+
+	// Responsive table sizing: poll the ListView width and re-fit columns +
+	// fonts on change (maximize/restore/window resize). Poll-based to read the
+	// settled client width that walk computes asynchronously.
+	u.startTableAdaptWatch()
+
+	// Maximize/resize flicker fix, scoped to the live table HWNDs only.
+	// Applying WS_CLIPCHILDREN to the whole tree broke the settings and
+	// connection pages (walk repaints widget backgrounds by inheriting an
+	// ancestor brush; containers that move/hide children need that repaint),
+	// so only the table and its static ListViews get the style now.
+	if u.tableView != nil {
+		applyNoFlickerStyles(u.tableView.Handle())
 	}
 }
 
@@ -144,9 +168,12 @@ func (u *UI) refreshSettingsInputs() {
 		u.edDebounce.SetText(fmt.Sprintf("%d", s.DebounceUM))
 		u.edBatch.SetText(s.Batch)
 	}
-	for i := 0; i < 7; i++ {
+	for i := 0; i < protocol.MaxChannels; i++ {
 		if u.edChName[i] != nil {
 			_ = u.edChName[i].SetText(s.Channels[i].Name)
+		}
+		if u.edChBleName[i] != nil {
+			_ = u.edChBleName[i].SetText(s.Channels[i].BleName)
 		}
 		if u.ckChUseTol[i] != nil {
 			u.ckChUseTol[i].SetChecked(s.Channels[i].UseTol)
@@ -172,6 +199,31 @@ func (u *UI) refreshSettingsInputs() {
 	}
 	if u.edNamePrefix != nil {
 		_ = u.edNamePrefix.SetText(s.NamePrefix)
+	}
+	u.refreshHIDBindingLabels()
+	u.refreshMESInputs(s)
+}
+
+// refreshHIDBindingLabels shows, for every channel, the bound HID device
+// fingerprint (shortened for display) so the operator can see which caliper
+// is filed to which channel without opening a dialog.
+func (u *UI) refreshHIDBindingLabels() {
+	s := u.app.GetSettings()
+	for i := 0; i < protocol.MaxChannels; i++ {
+		lbl := u.lblChHidFp[i]
+		if lbl == nil {
+			continue
+		}
+		fp := strings.TrimSpace(s.Channels[i].HidFP)
+		if fp == "" {
+			lbl.SetText("—")
+			continue
+		}
+		short := fp
+		if len(short) > 26 {
+			short = "…" + short[len(short)-25:]
+		}
+		lbl.SetText(short)
 	}
 }
 
@@ -213,9 +265,12 @@ func (u *UI) onSaveSettings() {
 	if u.edBatch != nil && u.edBatch.Text() != "" {
 		s.Batch = u.edBatch.Text()
 	}
-	for i := 0; i < 7; i++ {
+	for i := 0; i < protocol.MaxChannels; i++ {
 		if u.edChName[i] != nil {
 			s.Channels[i].Name = u.edChName[i].Text()
+		}
+		if u.edChBleName[i] != nil {
+			s.Channels[i].BleName = u.edChBleName[i].Text()
 		}
 		if u.ckChUseTol[i] != nil {
 			s.Channels[i].UseTol = u.ckChUseTol[i].Checked()
@@ -242,10 +297,12 @@ func (u *UI) onSaveSettings() {
 	if u.edNamePrefix != nil && u.edNamePrefix.Text() != "" {
 		s.NamePrefix = u.edNamePrefix.Text()
 	}
+	u.readMESFromControls(&s)
 	s.Normalize()
 	u.app.SetSettings(s)
 	u.refreshChannelComboBoxes() // 立即让所有下拉跟随新通道名
 	u.syncBridgeFromSettings(s)
+	u.app.ConfigureMES(s) // 应用 MES 配置（开关/URL/重试等变更即时生效）
 	u.model.SetDisplay(s.Digits, s.Unit, currentFilter(u), false)
 	u.model.PublishRowsReset()
 	u.repaintTable() // refresh owner-data cells (digits/unit/filter may have changed)
@@ -267,6 +324,7 @@ func (u *UI) onResetSettings() {
 		u.cmbTerm.SetCurrentIndex(0)
 	}
 	u.syncBridgeFromSettings(s)
+	u.app.ConfigureMES(s) // 恢复默认会关闭 MES
 	u.model.SetDisplay(s.Digits, s.Unit, "", false)
 	u.model.PublishRowsReset()
 	u.repaintTable()
@@ -290,16 +348,16 @@ func (u *UI) liveFilter() string {
 
 // applyFilter is the single point where a channel-filter change becomes
 // visible. Two things must happen together:
-//   1. Snapshot the live dropdown index into the model's STABLE filter cache.
-//      Rendering (RowCount + Value) then reads one consistent value for the
-//      whole paint; a transient CB_GETCURSEL wobble can no longer produce a
-//      correct row count with mixed channel cells.
-//   2. Force the owner-data TableView to REPAINT. walk's RowsReset only calls
-//      LVM_SETITEMCOUNT with LVSICF_NOINVALIDATEALL, which updates the row
-//      count but leaves previously painted cells untouched. Without this
-//      Invalidate the screen keeps showing the old (unfiltered) channel names
-//      even though the model data is already correct — exactly the "筛选不准"
-//      symptom: the dropdown shows CH2 but the table still mixes all channels.
+//  1. Snapshot the live dropdown index into the model's STABLE filter cache.
+//     Rendering (RowCount + Value) then reads one consistent value for the
+//     whole paint; a transient CB_GETCURSEL wobble can no longer produce a
+//     correct row count with mixed channel cells.
+//  2. Force the owner-data TableView to REPAINT. walk's RowsReset only calls
+//     LVM_SETITEMCOUNT with LVSICF_NOINVALIDATEALL, which updates the row
+//     count but leaves previously painted cells untouched. Without this
+//     Invalidate the screen keeps showing the old (unfiltered) channel names
+//     even though the model data is already correct — exactly the "筛选不准"
+//     symptom: the dropdown shows CH2 but the table still mixes all channels.
 func (u *UI) applyFilter() {
 	if u.model == nil {
 		return
@@ -344,18 +402,18 @@ func (u *UI) startFilterWatch() {
 				if u.cmbFilter == nil || u.model == nil {
 					return
 				}
-			idx := u.cmbFilter.CurrentIndex()
-			// A transient -1 (emitted during a selector model rebuild) is
-			// not a user selection; ignore it so a channel rename / save
-			// never clears a live filter.
-			if idx < 0 || idx == last {
-				return
-			}
-			last = idx
-			// Snapshot the confirmed index into the stable model cache and
-			// force a full owner-data repaint. PublishRowsReset alone only
-			// changes the row count and leaves stale channel cells on screen.
-			u.applyFilter()
+				idx := u.cmbFilter.CurrentIndex()
+				// A transient -1 (emitted during a selector model rebuild) is
+				// not a user selection; ignore it so a channel rename / save
+				// never clears a live filter.
+				if idx < 0 || idx == last {
+					return
+				}
+				last = idx
+				// Snapshot the confirmed index into the stable model cache and
+				// force a full owner-data repaint. PublishRowsReset alone only
+				// changes the row count and leaves stale channel cells on screen.
+				u.applyFilter()
 			})
 		}
 	}()
@@ -400,3 +458,67 @@ func (u *UI) refreshAnalysis() {
 }
 
 var _ = walk.Key(0)
+
+// onListHIDDevices is the self-check entry point: it lists keyboard-class HID
+// devices Raw Input can see, together with the current channel bindings. This
+// is how the operator confirms the fingerprints before relying on auto-filing.
+func (u *UI) onListHIDDevices() {
+	if u.bridge == nil {
+		info(u.main, "HID 设备自检", "硬件桥接未就绪")
+		return
+	}
+	devs := u.bridge.HIDListDevices()
+	// Index devices by fingerprint so each listed device can show its bound
+	// channel — that is how the operator tells a caliper from a laptop keyboard.
+	bound := make(map[string]int)
+	for _, bd := range u.app.HIDBindings() {
+		bound[bd.Fingerprint] = bd.Channel
+	}
+	var b strings.Builder
+	b.WriteString("Raw Input 检测到的键盘类 HID 设备：\n")
+	if len(devs) == 0 {
+		b.WriteString("  （无）\n")
+		b.WriteString("请确认卡尺已作为键盘设备连接；若开启捕获后仍为空，\n")
+		b.WriteString("说明 Raw Input 不可用，程序会回退到普通键盘钩子（无法自动分通道）。\n")
+	} else {
+		for i, d := range devs {
+			mark := ""
+			if ch := bound[d.Fingerprint]; ch > 0 {
+				mark = fmt.Sprintf("  ← 已绑定 CH%d", ch)
+			} else {
+				mark = "  （未绑定）"
+			}
+			b.WriteString(fmt.Sprintf("  %d. %s%s\n", i+1, d.Fingerprint, mark))
+		}
+	}
+	b.WriteString("\n提示：未绑定的卡尺，先在“实时检测”页选中目标通道测一次即完成绑定。\n")
+	b.WriteString("绑定后此处会标注 CHn，此后该卡尺读数自动归档到该通道。\n")
+	bindings := u.app.HIDBindings()
+	b.WriteString("\n已学习的绑定（设备指纹 → 通道）：\n")
+	if len(bindings) == 0 {
+		b.WriteString("  （无，尚未学习。选中通道后测一次即绑定）\n")
+	} else {
+		for _, bd := range bindings {
+			b.WriteString(fmt.Sprintf("  CH%d ← %s\n", bd.Channel, bd.Fingerprint))
+		}
+	}
+	info(u.main, "HID 设备自检", b.String())
+}
+
+// onClearHIDBindings removes all learned device-to-channel bindings.
+func (u *UI) onClearHIDBindings() {
+	n := len(u.app.HIDBindings())
+	if n == 0 {
+		info(u.main, "清除绑定", "当前没有 HID 绑定")
+		return
+	}
+	if !confirm(u.main, "清除绑定", fmt.Sprintf("确定清除全部 %d 条 HID 设备绑定吗？\n清除后需重新选中通道测量一次来学习。", n)) {
+		return
+	}
+	for i := 0; i < protocol.MaxChannels; i++ {
+		u.app.UnbindHIDChannel(i + 1)
+	}
+	u.SaveSettingsNow()
+	u.refreshHIDBindingLabels()
+	u.setStatus("已清除所有 HID 设备绑定")
+}

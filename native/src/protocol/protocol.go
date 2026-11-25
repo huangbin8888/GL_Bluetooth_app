@@ -8,6 +8,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -15,16 +16,10 @@ const (
 	ServiceUUID = "0000ffb0-0000-1000-8000-00805f9b34fb"
 	CharUUID    = "0000ffb2-0000-1000-8000-00805f9b34fb"
 	NamePrefix  = "GL-BLE#"
-	MaxChannels = 7
+	MaxChannels = 20
 	UMPerMM     = 1000
 	UMPerInch   = 25400 // 1 inch = 25.4 mm
 )
-
-// Fixed 7-colour coding. Colour is never the only cue: every badge also
-// carries CHn text and every CSV row carries the CHANNEL column.
-var CHColors = []string{
-	"#1668E3", "#0F9D58", "#E8912A", "#8E44AD", "#00A6B8", "#E5384A", "#D24AA0",
-}
 
 // 16 columns (15 base + CHANNEL). Kept as the PARSE whitelist so legacy
 // English CSV files remain importable; do NOT use it for export anymore.
@@ -99,11 +94,15 @@ type Record struct {
 	Verdict   string
 	Src       string
 	DeviceMAC string
-	Note      string
-	Ch        int
-	Legacy    bool
-	Inch      bool
-	TS        int64 // unix milliseconds
+	// DeviceName is the human-facing Bluetooth advertising name (GL-BLE#XXX)
+	// captured at connect time. It is UI-display-only: CSV/MES keep DeviceMAC,
+	// so exporting and uploading output is byte-for-byte unchanged.
+	DeviceName string
+	Note       string
+	Ch         int
+	Legacy     bool
+	Inch       bool
+	TS         int64 // unix milliseconds
 }
 
 // DropKey is the minimal shape needed by ShouldDrop.
@@ -138,13 +137,26 @@ func ParseFrame(raw string) *Frame {
 }
 
 // FrameBuffer reassembles byte streams: partial frames, glued frames, ACKs.
+// It is safe for concurrent use: the BLE notify callback (FeedRaw) and the
+// periodic idle-flush ticker (FlushPending) call Push/Flush from different
+// goroutines, so every access to buf is serialized by mu. Without this lock
+// the two writers race on f.buf (Go data race: lost/torn frames under BLE).
 type FrameBuffer struct {
+	mu  sync.Mutex
 	buf string
 }
 
 func NewFrameBuffer() *FrameBuffer { return &FrameBuffer{} }
-func (f *FrameBuffer) Reset()      { f.buf = "" }
-func (f *FrameBuffer) Pending() string { return f.buf }
+func (f *FrameBuffer) Reset() {
+	f.mu.Lock()
+	f.buf = ""
+	f.mu.Unlock()
+}
+func (f *FrameBuffer) Pending() string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.buf
+}
 
 func segmentFrame(seg string) *Frame {
 	m := frameRe.FindStringSubmatch(seg)
@@ -155,7 +167,10 @@ func segmentFrame(seg string) *Frame {
 }
 
 // Push appends a chunk and returns every complete frame/ACK parsed so far.
+// Safe for concurrent use with Flush/Reset/Pending.
 func (f *FrameBuffer) Push(chunk string) []Item {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.buf += chunk
 	out := make([]Item, 0)
 
@@ -198,7 +213,10 @@ func (f *FrameBuffer) Push(chunk string) []Item {
 }
 
 // Flush commits the held tail frame once no further chunk arrives.
+// Safe for concurrent use with Push/Reset/Pending.
 func (f *FrameBuffer) Flush() []Item {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	seg := f.buf
 	f.buf = ""
 	if fr := segmentFrame(seg); fr != nil {
@@ -286,13 +304,13 @@ func Verdict(um, lowerUM, upperUM int64) string {
 
 // Stats mirrors protocol.stats (population standard deviation).
 type Stats struct {
-	N       int
-	MeanUM  float64
-	MaxUM   int64
-	MinUM   int64
-	SDUM    float64
-	OK      int
-	OKRate  int
+	N      int
+	MeanUM float64
+	MaxUM  int64
+	MinUM  int64
+	SDUM   float64
+	OK     int
+	OKRate int
 }
 
 // TolResolver returns the tolerance bounds (in micrometres) for a channel.
@@ -483,13 +501,13 @@ func CsvParse(text string) CSVParseResult {
 
 // CSVDefaults supplies fallbacks for csvToRecords.
 type CSVDefaults struct {
-	ChannelNo  int
-	Date       string
-	Batch      string
-	LowerUM    int64
-	UpperUM    int64
-	ChannelNames []string  // index 0..6 -> custom CHn name; reverse lookup on import
-	ResolveTol TolResolver // optional per-channel tolerance resolver
+	ChannelNo    int
+	Date         string
+	Batch        string
+	LowerUM      int64
+	UpperUM      int64
+	ChannelNames []string    // index 0..6 -> custom CHn name; reverse lookup on import
+	ResolveTol   TolResolver // optional per-channel tolerance resolver
 }
 
 // resolveChannelFromCell accepts "CHn"/"n" and custom names written by
@@ -601,8 +619,8 @@ func CsvToRecords(parsed CSVParseResult, d CSVDefaults) (records []Record, badRo
 type CSVMeta struct {
 	Date, Batch, Item, Nominal, LowerTol, UpperTol string
 	LowerUM, UpperUM                               int64
-	ChannelNames []string
-	ResolveTol   TolResolver
+	ChannelNames                                   []string
+	ResolveTol                                     TolResolver
 }
 
 // channelLabel writes the custom channel name when configured, otherwise the

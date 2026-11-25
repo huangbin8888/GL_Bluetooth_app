@@ -19,15 +19,15 @@ import (
 var (
 	user32 = windows.NewLazySystemDLL("user32.dll")
 
-	procSetWindowsHookEx   = user32.NewProc("SetWindowsHookExW")
-	procUnhookWindowsHook  = user32.NewProc("UnhookWindowsHookEx")
-	procCallNextHookEx     = user32.NewProc("CallNextHookEx")
-	procGetMessage         = user32.NewProc("GetMessageW")
-	procTranslateMessage   = user32.NewProc("TranslateMessage")
-	procDispatchMessage    = user32.NewProc("DispatchMessageW")
-	procMapVirtualKey      = user32.NewProc("MapVirtualKeyW")
-	procGetKeyState        = user32.NewProc("GetKeyState")
-	procPostThreadMessage  = user32.NewProc("PostThreadMessageW")
+	procSetWindowsHookEx  = user32.NewProc("SetWindowsHookExW")
+	procUnhookWindowsHook = user32.NewProc("UnhookWindowsHookEx")
+	procCallNextHookEx    = user32.NewProc("CallNextHookEx")
+	procGetMessage        = user32.NewProc("GetMessageW")
+	procTranslateMessage  = user32.NewProc("TranslateMessage")
+	procDispatchMessage   = user32.NewProc("DispatchMessageW")
+	procMapVirtualKey     = user32.NewProc("MapVirtualKeyW")
+	procGetKeyState       = user32.NewProc("GetKeyState")
+	procPostThreadMessage = user32.NewProc("PostThreadMessageW")
 )
 
 const (
@@ -37,33 +37,42 @@ const (
 	wmSysKeyDown = 0x0104
 	wmQuit       = 0x0012
 
-	vkTab    = 0x09
-	vkReturn = 0x0D
-	vkShift  = 0x10
-	vkDecimal = 0x6E // numpad '.'
+	vkTab      = 0x09
+	vkReturn   = 0x0D
+	vkShift    = 0x10
+	vkDecimal  = 0x6E // numpad '.'
 	vkSubtract = 0x6D // numpad '-'
 )
 
 type kbdLLHookStruct struct {
-	vkCode     uint32
-	scanCode   uint32
-	flags      uint32
-	time       uint32
+	vkCode      uint32
+	scanCode    uint32
+	flags       uint32
+	time        uint32
 	dwExtraInfo uintptr
+}
+
+// captureRun is one Start→Stop lifecycle. Keeping per-run state (thread ID,
+// hook handle, quit channel) in its own object is what makes a Capture
+// safely reusable: a second Start creates a fresh run and an old hookLoop can
+// never close the new run's channel or post WM_QUIT to the new thread.
+type captureRun struct {
+	threadID uint32
+	hook     uintptr
+	ready    chan struct{} // closed once hook install has been attempted
+	done     chan struct{} // closed once the hook thread has fully exited
+	quitOnce sync.Once     // at most one WM_QUIT per run
 }
 
 // Capture holds the hook state and the token stream.
 type Capture struct {
-	mu        sync.Mutex
-	hook      uintptr
-	threadID  uint32
-	enabled   bool
-	buf       strings.Builder
-	onToken   func(string)
-	onKey     func(string) // optional live key preview
-	terminator string     // "ENTER" or "TAB"
-	running   chan struct{}
-	stopOnce  sync.Once
+	mu         sync.Mutex
+	enabled    bool
+	buf        strings.Builder
+	onToken    func(string)
+	onKey      func(string) // optional live key preview
+	terminator string       // "ENTER" or "TAB"
+	run        *captureRun  // current active lifecycle; nil when stopped
 }
 
 // New creates a capture. onToken receives one complete reading line;
@@ -78,46 +87,55 @@ func New(terminator string, onToken func(string), onKey func(string)) *Capture {
 var hookRef *Capture // package-level so the callback trampoline can reach it
 
 // Start installs the hook and runs its own message pump on a dedicated OS
-// thread via lockOSThread semantics enforced by the caller (walk runs on the
-// UI goroutine; we spin a separate goroutine that locks itself to a thread).
+// thread. Each call after a Stop creates a brand-new run, so the Capture is
+// safely reusable across repeated toggle on/off cycles.
 func (c *Capture) Start() error {
 	c.mu.Lock()
-	if c.enabled {
+	if c.enabled && c.run != nil {
 		c.mu.Unlock()
 		return nil
 	}
-	c.running = make(chan struct{})
+	run := &captureRun{
+		ready: make(chan struct{}),
+		done:  make(chan struct{}),
+	}
+	c.run = run
 	c.enabled = true
 	c.mu.Unlock()
 
 	hookRef = c
-	go c.hookLoop()
+	go c.hookLoop(run)
 	return nil
 }
 
-func (c *Capture) hookLoop() {
+// hookLoop owns one captureRun. It never touches c.run/c.hook/c.running so an
+// old loop exiting late cannot disturb a newer lifecycle that replaced it.
+func (c *Capture) hookLoop(run *captureRun) {
 	runtime.LockOSThread()
 	defer runtime.UnlockOSThread()
 
 	c.mu.Lock()
-	c.threadID = windows.GetCurrentThreadId()
-	h, _, callErr := procSetWindowsHookEx.Call(
+	run.threadID = windows.GetCurrentThreadId()
+	h, _, _ := procSetWindowsHookEx.Call(
 		uintptr(whKeyboardLL),
 		windows.NewCallback(hookProc),
 		0, // hMod = 0 for WH_KEYBOARD_LL (callback in current process)
 		0, // dwThreadId = 0 => global
 	)
-	c.hook = h
-	if c.hook == 0 {
-		c.mu.Unlock()
-		c.mu.Lock()
+	run.hook = h
+	installed := h != 0
+	if !installed {
+		// Installation failed: mark this run finished and drop enabled only if
+		// we are still the active run.
 		c.enabled = false
-		c.mu.Unlock()
-		close(c.running)
+		c.run = nil
+	}
+	c.mu.Unlock()
+	close(run.ready)
+	if !installed {
+		close(run.done)
 		return
 	}
-	_ = callErr
-	c.mu.Unlock()
 
 	var msg struct {
 		hwnd    uintptr
@@ -130,49 +148,76 @@ func (c *Capture) hookLoop() {
 	}
 	for {
 		r, _, _ := procGetMessage.Call(uintptr(unsafe.Pointer(&msg)), 0, 0, 0)
-		if int32(r) <= 0 {
-			break
-		}
-		if msg.message == wmQuit {
+		if int32(r) <= 0 || msg.message == wmQuit {
 			break
 		}
 		procTranslateMessage.Call(uintptr(unsafe.Pointer(&msg)))
 		procDispatchMessage.Call(uintptr(unsafe.Pointer(&msg)))
 	}
 
-	procUnhookWindowsHook.Call(uintptr(c.hook))
-	c.mu.Lock()
-	c.hook = 0
-	c.enabled = false
-	c.mu.Unlock()
-	close(c.running)
+	procUnhookWindowsHook.Call(run.hook)
+
+	c.finishRun(run)
+	close(run.done)
 }
 
-// Stop posts WM_QUIT to the hook thread and waits for it to unhook.
-func (c *Capture) Stop() {
-	c.stopOnce.Do(func() {
-		c.mu.Lock()
-		tid, enabled := c.threadID, c.enabled
-		ch := c.running
+// finishRun clears the lifecycle state only when run is still the active one.
+// This is the guard that makes a stale loop harmless: after Stop→Start a new
+// run replaces the old, so the old loop's late exit must not clear the new
+// run's enabled flag or run pointer.
+func (c *Capture) finishRun(run *captureRun) {
+	c.mu.Lock()
+	if c.run == run {
+		c.run = nil
 		c.enabled = false
-		c.mu.Unlock()
-		if enabled && tid != 0 && ch != nil {
-			procPostThreadMessage.Call(uintptr(tid), uintptr(wmQuit), 0, 0)
-			select {
-			case <-ch:
-			case <-time.After(1500 * time.Millisecond):
-			}
-		}
+	}
+	c.mu.Unlock()
+}
+
+// Stop posts WM_QUIT to this run's hook thread and waits for it to unhook.
+// It is idempotent and, unlike the old stopOnce version, works on every
+// subsequent Start→Stop cycle.
+func (c *Capture) Stop() {
+	c.mu.Lock()
+	run := c.run
+	c.enabled = false
+	// A stop→start cycle reuses this instance; drop any half-typed token.
+	c.buf.Reset()
+	c.mu.Unlock()
+
+	if run == nil {
 		if hookRef == c {
 			hookRef = nil
 		}
+		return
+	}
+
+	run.quitOnce.Do(func() {
+		// Wait until the hook thread has finished installing. Without this, a
+		// Stop issued immediately after Start could read threadID==0, skip the
+		// WM_QUIT post, and leave the message loop blocked forever. ready is
+		// always closed by hookLoop (success or failure), so this cannot hang.
+		<-run.ready
+		c.mu.Lock()
+		tid := run.threadID
+		c.mu.Unlock()
+		if tid != 0 {
+			procPostThreadMessage.Call(uintptr(tid), uintptr(wmQuit), 0, 0)
+		}
 	})
+	select {
+	case <-run.done:
+	case <-time.After(1500 * time.Millisecond):
+	}
+	if hookRef == c {
+		hookRef = nil
+	}
 }
 
 func (c *Capture) IsEnabled() bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	return c.enabled
+	return c.enabled && c.run != nil
 }
 
 // SetTerminator switches the token terminator at runtime.
@@ -212,9 +257,7 @@ func (c *Capture) handleKey(vk uint32, flags uint32) {
 
 	isTerm := (c.terminator == "TAB" && vk == vkTab) ||
 		(c.terminator == "ENTER" && vk == vkReturn)
-	// Always accept the other terminator too, so a mismatched device setting
-	// never merges two readings.
-	if vk == vkTab || vk == vkReturn {
+	if isTerm {
 		tok := strings.TrimSpace(c.buf.String())
 		c.buf.Reset()
 		if tok != "" && c.onToken != nil {
@@ -228,7 +271,6 @@ func (c *Capture) handleKey(vk uint32, flags uint32) {
 	if ch == "" {
 		return // ignore control / untranslatable keys
 	}
-	_ = isTerm
 	c.buf.WriteString(ch)
 	if c.onKey != nil {
 		fn := c.onKey

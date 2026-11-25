@@ -14,8 +14,35 @@ import (
 	"sync"
 	"time"
 
+	"glcaliper/mes"
 	"glcaliper/protocol"
 )
+
+// MESSettings is the persisted configuration for the optional MES upload
+// module. It is appended to Settings with JSON tags; old config files that
+// lack these keys deserialize to zero values and are Normalize()-ed to the
+// defaults (Enable=false), so behaviour is byte-for-byte the old version.
+type MESSettings struct {
+	Enable      bool   `json:"enable"`
+	URL         string `json:"url"`
+	Token       string `json:"token"`
+	FieldPrefix string `json:"fieldPrefix"`
+	TimeoutMS   int    `json:"timeoutMS"`
+	Retry       int    `json:"retry"`
+	QueueSize   int    `json:"queueSize"`
+	Scope       string `json:"scope"` // "all" | "pass" | "fail"
+}
+
+// ToConfig converts persisted settings into a MES client config, applying the
+// same defaults the mes package uses.
+func (m MESSettings) ToConfig() mes.Config {
+	return mes.Config{
+		Enable: m.Enable, URL: m.URL, Token: m.Token,
+		FieldPrefix: m.FieldPrefix, TimeoutMS: m.TimeoutMS,
+		Retry: m.Retry, QueueSize: m.QueueSize,
+		Scope: mes.Scope(m.Scope),
+	}.Normalize()
+}
 
 // LinkMode is the active data source.
 type LinkMode string
@@ -31,6 +58,8 @@ const (
 // UseTol=false (or an invalid range) means "fall back to global tolerance".
 type ChannelConfig struct {
 	Name    string  `json:"name"`
+	BleName string  `json:"bleName"` // user-editable Bluetooth name for this channel (display/config only)
+	HidFP   string  `json:"hidFp"`   // learned Raw Input device fingerprint bound to this channel
 	UseTol  bool    `json:"useTol"`
 	LowerMM float64 `json:"lowerMM"`
 	UpperMM float64 `json:"upperMM"`
@@ -52,13 +81,14 @@ type Settings struct {
 	Batch      string
 
 	// —— 新增字段（缺字段由 Normalize/DefaultSettings 兜底）——
-	NamePrefix     string                    `json:"namePrefix"`
+	NamePrefix     string                              `json:"namePrefix"`
 	Channels       [protocol.MaxChannels]ChannelConfig `json:"channels"`
-	AlertOnBad     bool                      `json:"alertOnBad"`
-	AutoReconnect  bool                      `json:"autoReconnect"`
-	IdleDisconnect bool                      `json:"idleDisconnect"`
-	IdleMinutes    int                       `json:"idleMinutes"`
-	LastDeviceAddr string                    `json:"lastDeviceAddr"`
+	AlertOnBad     bool                                `json:"alertOnBad"`
+	AutoReconnect  bool                                `json:"autoReconnect"`
+	IdleDisconnect bool                                `json:"idleDisconnect"`
+	IdleMinutes    int                                 `json:"idleMinutes"`
+	LastDeviceAddr string                              `json:"lastDeviceAddr"`
+	MES            MESSettings                         `json:"mes"`
 }
 
 func DefaultSettings() Settings {
@@ -70,11 +100,15 @@ func DefaultSettings() Settings {
 		NamePrefix: protocol.NamePrefix,
 		AlertOnBad: false, AutoReconnect: false, IdleDisconnect: false,
 		IdleMinutes: 5, LastDeviceAddr: "",
+		MES: MESSettings{
+			Enable: false, TimeoutMS: 5000, Retry: 2,
+			QueueSize: 500, Scope: "all",
+		},
 	}
 }
 
-func (s Settings) lowerUM() int64  { return int64((s.NominalMM + s.LowerTolMM) * 1000) }
-func (s Settings) upperUM() int64  { return int64((s.NominalMM + s.UpperTolMM) * 1000) }
+func (s Settings) lowerUM() int64 { return int64((s.NominalMM + s.LowerTolMM) * 1000) }
+func (s Settings) upperUM() int64 { return int64((s.NominalMM + s.UpperTolMM) * 1000) }
 
 // Normalize folds all legacy sanity merges plus new-field defaults into one
 // pure step. Both LoadSettings and onResetSettings go through it so an old
@@ -87,8 +121,13 @@ func (s *Settings) Normalize() {
 	if s.Digits < 0 || s.Digits > 6 {
 		s.Digits = d.Digits
 	}
+	// MaxCh is a legacy field with no UI editor. The Channels array and every
+	// selector are fixed at protocol.MaxChannels, so MaxCh no longer caps
+	// functionality. Preserve a user's stored value (don't overwrite config),
+	// only repairing an out-of-range legacy value. SetChannel and DEMO use
+	// protocol.MaxChannels directly.
 	if s.MaxCh < 1 || s.MaxCh > protocol.MaxChannels {
-		s.MaxCh = d.MaxCh
+		s.MaxCh = protocol.MaxChannels
 	}
 	if s.DebounceUM < 0 {
 		s.DebounceUM = d.DebounceUM
@@ -107,6 +146,23 @@ func (s *Settings) Normalize() {
 	}
 	if s.IdleMinutes <= 0 {
 		s.IdleMinutes = d.IdleMinutes
+	}
+	// MES defaults: an absent/legacy "mes" object normalizes to disabled with
+	// safe queue/timeout/retry values. ToConfig applies the same defaults again.
+	mesDefaults := d.MES.ToConfig()
+	if s.MES.TimeoutMS <= 0 {
+		s.MES.TimeoutMS = mesDefaults.TimeoutMS
+	}
+	if s.MES.Retry < 0 {
+		s.MES.Retry = 0
+	}
+	if s.MES.QueueSize <= 0 {
+		s.MES.QueueSize = mesDefaults.QueueSize
+	}
+	switch s.MES.Scope {
+	case "all", "pass", "fail":
+	default:
+		s.MES.Scope = "all"
 	}
 	// Channels[i].Name empty is legal; UseTol=false means "use global".
 	// Invalid bounds (UpperMM <= LowerMM) are handled by ChannelBounds.
@@ -134,6 +190,17 @@ func (s Settings) ChannelName(ch int) string {
 	return "CH" + itoa(ch) // itoa lives in chart.go, same package
 }
 
+// ChannelBleName returns the user-edited Bluetooth name configured for a
+// channel. It is the display override for the live table's "设备名称" column:
+// a blank (or out-of-range) value lets the caller fall back to the advertising
+// name captured at connect time. Mirrors ChannelName's 1-based indexing.
+func (s Settings) ChannelBleName(ch int) string {
+	if ch >= 1 && ch <= protocol.MaxChannels {
+		return strings.TrimSpace(s.Channels[ch-1].BleName)
+	}
+	return ""
+}
+
 // Change is pushed to UI observers whenever state changes.
 type Change struct {
 	Kind string // "record" | "status" | "reset"
@@ -142,11 +209,11 @@ type Change struct {
 
 // App is the central state holder.
 type App struct {
-	mu       sync.Mutex
-	Settings Settings
-	Records  []protocol.Record
-	fb       *protocol.FrameBuffer
-	last     map[int]protocol.DropKey
+	mu          sync.Mutex
+	Settings    Settings
+	Records     []protocol.Record
+	fb          *protocol.FrameBuffer
+	last        map[int]protocol.DropKey
 	channel     int
 	mode        LinkMode
 	status      string
@@ -154,9 +221,14 @@ type App struct {
 	demoOn      bool
 	demoStop    chan struct{}
 	deviceLabel string // address/name of the currently connected BLE device
+	deviceName  string // Bluetooth advertising name (GL-BLE#XXX) of that device; UI-only
 
-	changeCh chan Change
+	changeCh  chan Change
 	listeners []func(Change)
+
+	mesMu   sync.RWMutex
+	mesCtl  *mes.Client // nil when MES is disabled
+	mesStat func(mes.Status)
 }
 
 func NewApp() *App {
@@ -215,7 +287,7 @@ func (a *App) SetMode(m LinkMode) {
 
 func (a *App) SetChannel(ch int) {
 	a.mu.Lock()
-	if ch >= 1 && ch <= a.Settings.MaxCh {
+	if ch >= 1 && ch <= protocol.MaxChannels {
 		a.channel = ch
 	}
 	a.mu.Unlock()
@@ -239,6 +311,64 @@ func (a *App) SetSettings(s Settings) {
 	a.mu.Unlock()
 }
 
+// OnMESStatus registers the UI callback for upload status/queue changes.
+func (a *App) OnMESStatus(fn func(mes.Status)) {
+	a.mesMu.Lock()
+	a.mesStat = fn
+	a.mesMu.Unlock()
+}
+
+// ConfigureMES (re)builds the uploader from the given settings. It stops any
+// previous client first. When MES is disabled or the URL is blank, no client
+// is kept, so commit() takes the zero-cost path. Safe to call repeatedly.
+func (a *App) ConfigureMES(s Settings) {
+	a.mesMu.Lock()
+	old := a.mesCtl
+	a.mesCtl = nil
+	cfg := s.MES.ToConfig()
+	var next *mes.Client
+	if cfg.Enabled() {
+		next = mes.New(cfg, func(st mes.Status) {
+			a.mesMu.RLock()
+			fn := a.mesStat
+			a.mesMu.RUnlock()
+			if fn != nil {
+				fn(st)
+			}
+		})
+	}
+	a.mesCtl = next
+	a.mesMu.Unlock()
+
+	if old != nil {
+		// Drain+stop the previous uploader off the caller's goroutine. Stopping
+		// a backed-up queue (bounded retries x timeout per item) must never
+		// block the UI thread when settings are saved. Drain still preserves
+		// already-queued records; only the UI wait is removed.
+		go old.Stop()
+	}
+	if next != nil {
+		next.Start()
+	}
+}
+
+// MESQueueLen returns the current upload queue depth (0 when disabled).
+func (a *App) MESQueueLen() int {
+	a.mesMu.RLock()
+	defer a.mesMu.RUnlock()
+	if a.mesCtl == nil {
+		return 0
+	}
+	return a.mesCtl.Len()
+}
+
+// MESActive reports whether uploading is currently enabled.
+func (a *App) MESActive() bool {
+	a.mesMu.RLock()
+	defer a.mesMu.RUnlock()
+	return a.mesCtl != nil
+}
+
 // SetDeviceLabel injects the address/name of the currently connected BLE
 // device. It is written into Record.DeviceMAC by commit() so the exported
 // "设备名称" column is populated for live BLE measurements.
@@ -253,6 +383,23 @@ func (a *App) DeviceLabel() string {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	return a.deviceLabel
+}
+
+// SetDeviceName injects the Bluetooth advertising name (e.g. "GL-BLE#1234")
+// of the currently connected device. commit() stamps it into Record.DeviceName
+// for the live table's "设备名称" column. It is display-only: DeviceMAC (used
+// by CSV/MES) is untouched.
+func (a *App) SetDeviceName(name string) {
+	a.mu.Lock()
+	a.deviceName = strings.TrimSpace(name)
+	a.mu.Unlock()
+}
+
+// DeviceName returns the currently injected Bluetooth advertising name.
+func (a *App) DeviceName() string {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.deviceName
 }
 
 // FeedRaw pushes a raw BLE notify chunk into the assembly buffer.
@@ -272,6 +419,139 @@ func (a *App) FeedHIDToken(token string) bool {
 	for _, it := range items {
 		if it.Type == "data" {
 			a.commit(it.Frame, a.Channel(), "HID")
+		}
+	}
+	return true
+}
+
+// HIDBinding is one learned fingerprint-to-channel association.
+type HIDBinding struct {
+	Fingerprint string
+	Channel     int
+}
+
+// HIDBoundChannel returns the 1-based channel bound to a HID device
+// fingerprint, or 0 when the fingerprint is empty/unbound.
+func (a *App) HIDBoundChannel(fp string) int {
+	fp = strings.TrimSpace(fp)
+	if fp == "" {
+		return 0
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	for i := range a.Settings.Channels {
+		if a.Settings.Channels[i].HidFP == fp {
+			return i + 1
+		}
+	}
+	return 0
+}
+
+// BindHID learns/binds a device fingerprint to a channel. Binding one
+// fingerprint to a new channel clears any previous binding it had; binding a
+// different fingerprint to an occupied channel replaces that channel's token.
+// It returns true when the binding changed.
+func (a *App) BindHID(fp string, ch int) bool {
+	fp = strings.TrimSpace(fp)
+	if fp == "" || ch < 1 || ch > protocol.MaxChannels {
+		return false
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	// Compute whether anything will change before mutating. The fingerprint
+	// must live on exactly one channel: the requested one.
+	target := &a.Settings.Channels[ch-1]
+	alreadyOnlyHere := target.HidFP == fp
+	for i := range a.Settings.Channels {
+		if i+1 == ch {
+			continue
+		}
+		if a.Settings.Channels[i].HidFP == fp {
+			alreadyOnlyHere = false
+		}
+	}
+	if alreadyOnlyHere {
+		return false
+	}
+	for i := range a.Settings.Channels {
+		cfg := &a.Settings.Channels[i]
+		if cfg.HidFP == fp && i+1 != ch {
+			cfg.HidFP = ""
+		}
+	}
+	target.HidFP = fp
+	return true
+}
+
+// UnbindHID clears the channel currently bound to a fingerprint.
+func (a *App) UnbindHID(fp string) bool {
+	fp = strings.TrimSpace(fp)
+	if fp == "" {
+		return false
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	for i := range a.Settings.Channels {
+		if a.Settings.Channels[i].HidFP == fp {
+			a.Settings.Channels[i].HidFP = ""
+			return true
+		}
+	}
+	return false
+}
+
+// UnbindHIDChannel clears any fingerprint bound to a channel.
+func (a *App) UnbindHIDChannel(ch int) bool {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if ch >= 1 && ch <= protocol.MaxChannels && a.Settings.Channels[ch-1].HidFP != "" {
+		a.Settings.Channels[ch-1].HidFP = ""
+		return true
+	}
+	return false
+}
+
+// HIDBindings returns all learned fingerprint-to-channel bindings.
+func (a *App) HIDBindings() []HIDBinding {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	out := make([]HIDBinding, 0)
+	for i := range a.Settings.Channels {
+		if fp := a.Settings.Channels[i].HidFP; fp != "" {
+			out = append(out, HIDBinding{Fingerprint: fp, Channel: i + 1})
+		}
+	}
+	return out
+}
+
+// FeedHIDTokenWithDevice turns one HID token into a DAT0 frame and commits it
+// to the channel resolved from the device fingerprint. A bound device always
+// goes to its bound channel (ignoring the current selector); an unbound device
+// is auto-learned onto the current channel on its first reading. When no
+// fingerprint is available it behaves exactly like FeedHIDToken.
+func (a *App) FeedHIDTokenWithDevice(token, fp string) bool {
+	frameStr := protocol.HidToFrame(token)
+	if frameStr == "" {
+		return false
+	}
+	ch := a.Channel()
+	fp = strings.TrimSpace(fp)
+	if fp != "" {
+		if bound := a.HIDBoundChannel(fp); bound > 0 {
+			ch = bound
+		} else {
+			// First reading from an unseen device: learn it onto the current
+			// channel so subsequent readings auto-file even if the selector moves.
+			if a.BindHID(fp, ch) {
+				a.emit(Change{Kind: "hidbind", Text: fmt.Sprintf("已绑定 HID 设备到 CH%d", ch)})
+			}
+		}
+	}
+	fb := protocol.NewFrameBuffer()
+	items := append(fb.Push(frameStr), fb.Flush()...)
+	for _, it := range items {
+		if it.Type == "data" {
+			a.commit(it.Frame, ch, "HID")
 		}
 	}
 	return true
@@ -337,16 +617,39 @@ func (a *App) commit(fr *protocol.Frame, ch int, src string) {
 	if src == "BLE" && a.deviceLabel != "" {
 		devLabel = a.deviceLabel
 	}
+	// Device name for the live table's "设备名称" column. BLE records use the
+	// injected advertising name (GL-BLE#XXX), falling back to DeviceMAC so the
+	// cell is never blank; HID/DEMO keep their source tag. DeviceMAC itself is
+	// not changed, so CSV/MES output remains identical.
+	devName := src
+	if src == "BLE" {
+		if a.deviceName != "" {
+			devName = a.deviceName
+		} else if devLabel != "" {
+			devName = devLabel
+		}
+	}
 	rec := protocol.Record{
 		Date: protocol.Today(), T: protocol.Clock(), Seq: a.seq,
 		Batch: s.Batch, ValueUM: fr.ValueUM, V: protocol.ToMM(fr.ValueUM),
 		Raw: fr.Raw, RawValue: fmt.Sprintf("%.4f", fr.RawValue), RawUnit: fr.Unit,
 		Verdict: protocol.Verdict(fr.ValueUM, lo, hi),
-		Src: src, DeviceMAC: devLabel, Ch: ch, Inch: fr.Unit == "i", TS: now,
+		Src:     src, DeviceMAC: devLabel, DeviceName: devName, Ch: ch, Inch: fr.Unit == "i", TS: now,
 	}
 	a.Records = append(a.Records, rec)
 	total := len(a.Records)
+	channelName := s.ChannelName(ch)
 	a.mu.Unlock()
+
+	// MES upload happens OUTSIDE a.mu and never blocks the record pipeline.
+	// Grab the client under mesMu, release, then a lock-free bounded enqueue.
+	a.mesMu.RLock()
+	ctl := a.mesCtl
+	a.mesMu.RUnlock()
+	if ctl != nil {
+		ctl.Enqueue(mes.UploadItem{Record: rec, ChannelName: channelName})
+	}
+
 	a.emit(Change{Kind: "record", Text: fmt.Sprintf("已记录 #%d", total)})
 }
 
@@ -470,10 +773,10 @@ func (a *App) ExportCsv(path, scope string) (int, error) {
 	s := a.GetSettings()
 	meta := protocol.CSVMeta{
 		Date: protocol.Today(), Batch: s.Batch,
-		Nominal: fmt.Sprintf("%.4f", s.NominalMM),
+		Nominal:  fmt.Sprintf("%.4f", s.NominalMM),
 		LowerTol: fmt.Sprintf("%.4f", s.LowerTolMM),
 		UpperTol: fmt.Sprintf("%.4f", s.UpperTolMM),
-		LowerUM: s.lowerUM(), UpperUM: s.upperUM(),
+		LowerUM:  s.lowerUM(), UpperUM: s.upperUM(),
 		ChannelNames: channelNamesOf(s), ResolveTol: s.ChannelBounds,
 	}
 	csv := protocol.RecordsToCsv(recs, meta)
@@ -521,7 +824,7 @@ func (a *App) StartDemo() {
 				return
 			case <-ticker.C:
 				v := base + (rng.Float64()-0.5)*0.16
-				ch := rng.Intn(a.GetSettings().MaxCh) + 1
+				ch := rng.Intn(protocol.MaxChannels) + 1
 				a.FeedDemoValue(v, ch)
 			}
 		}

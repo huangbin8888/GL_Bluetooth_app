@@ -5,8 +5,8 @@ package ui
 import (
 	"time"
 
-	"golang.org/x/sys/windows"
 	"glcaliper/protocol"
+	"golang.org/x/sys/windows"
 )
 
 // messageBeep resolves user32!MessageBeep lazily. It exists on Windows 7 and

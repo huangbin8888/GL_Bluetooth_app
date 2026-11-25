@@ -22,20 +22,20 @@ const (
 // walk / image dependency) lets both render paths derive the exact same
 // colours, so the exported PNG matches what the user sees.
 const (
-	chInkR, chInkG, chInkB       = 30, 41, 59   // primary text
-	chSubR, chSubG, chSubB       = 100, 116, 139 // secondary text / ticks
-	chPlotR, chPlotG, chPlotB    = 250, 252, 255 // plot area card background
-	chGridR, chGridG, chGridB    = 229, 235, 243 // horizontal grid lines
-	chAxisR, chAxisG, chAxisB    = 203, 213, 225 // axis frame
-	chBandR, chBandG, chBandB    = 255, 251, 242 // tolerance band fill (whisper-light warm)
-	chTolR, chTolG, chTolB       = 232, 158, 40  // tolerance edge lines (amber)
-	chMeanR, chMeanG, chMeanB    = 148, 163, 184 // mean reference line
-	chLineR, chLineG, chLineB    = 37, 99, 235   // main series (modern blue)
-	chAreaR, chAreaG, chAreaB    = 219, 232, 254 // line area fill (pale blue)
-	chBarTopR, chBarTopG, chBarTopB = 96, 165, 250 // bar gradient top
-	chBadR, chBadG, chBadB       = 225, 70, 85    // out-of-tolerance red
+	chInkR, chInkG, chInkB          = 30, 41, 59    // primary text
+	chSubR, chSubG, chSubB          = 100, 116, 139 // secondary text / ticks
+	chPlotR, chPlotG, chPlotB       = 250, 252, 255 // plot area card background
+	chGridR, chGridG, chGridB       = 229, 235, 243 // horizontal grid lines
+	chAxisR, chAxisG, chAxisB       = 203, 213, 225 // axis frame
+	chBandR, chBandG, chBandB       = 255, 251, 242 // tolerance band fill (whisper-light warm)
+	chTolR, chTolG, chTolB          = 232, 158, 40  // tolerance edge lines (amber)
+	chMeanR, chMeanG, chMeanB       = 148, 163, 184 // mean reference line
+	chLineR, chLineG, chLineB       = 37, 99, 235   // main series (modern blue)
+	chAreaR, chAreaG, chAreaB       = 219, 232, 254 // line area fill (pale blue)
+	chBarTopR, chBarTopG, chBarTopB = 96, 165, 250  // bar gradient top
+	chBadR, chBadG, chBadB          = 225, 70, 85   // out-of-tolerance red
 	chBadTopR, chBadTopG, chBadTopB = 248, 113, 121 // bad bar gradient top
-	chWhiteR, chWhiteG, chWhiteB = 255, 255, 255
+	chWhiteR, chWhiteG, chWhiteB    = 255, 255, 255
 )
 
 // labelBounds is the plot rectangle that a value label must stay inside.

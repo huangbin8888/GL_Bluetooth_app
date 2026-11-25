@@ -14,11 +14,11 @@ import (
 // 单一琥珀强调色 + 等宽数字 + 判定色块，工业高对比。
 var (
 	// 浅色工作区
-	colorText    = walk.RGB(30, 38, 48)
-	colorSub     = walk.RGB(96, 110, 128)
-	colorBorder  = walk.RGB(214, 222, 232)
-	colorBg      = walk.RGB(244, 247, 250)
-	colorWhite   = walk.RGB(255, 255, 255)
+	colorText   = walk.RGB(30, 38, 48)
+	colorSub    = walk.RGB(96, 110, 128)
+	colorBorder = walk.RGB(214, 222, 232)
+	colorBg     = walk.RGB(244, 247, 250)
+	colorWhite  = walk.RGB(255, 255, 255)
 
 	// 琥珀强调（浅底用深琥珀，深底用亮琥珀）
 	colorPrimary     = walk.RGB(198, 102, 8)
@@ -46,25 +46,58 @@ var (
 	colorSrcDemo = walk.RGB(185, 155, 255)
 
 	// 等宽字体（Precision Instrument 的数字语言）
-	fontReading  *walk.Font
-	fontCell     *walk.Font
-	fontCellBold *walk.Font
+	fontReading   *walk.Font
+	fontCell      *walk.Font
+	fontCellBold  *walk.Font
 	fontCellSmall *walk.Font // 时间/单位列的小号字体
 )
 
-// tableFontSizePt 是表格内容字号：按需求把原先 10pt 的单元格文字整体放大约 3 倍。
-// 注意：表格行高由 TableView 控件字体决定（walk 的 applyFont 会向两个内部
-// SysListView32 发 WM_SETFONT），因此控件字体与单元格字体必须一起放大，
-// 否则行高不变会把放大后的文字截断。列宽在 pages_detect.go 同步放大。
+// tableFontSizePt 是表格内容字号的基准值（窗口为基准宽度时）。按需求把原先
+// 10pt 的单元格文字整体放大约 3 倍。表格现在会随窗口宽度响应式缩放字号，
+// 该常量是缩放基准（scale=1 时的磅值），不是固定值。
 const tableFontSizePt = 30
 
-// initFonts 创建表格/读数使用的字体（只创建一次）。
+// initFonts 创建读数等不随表格缩放的字体。表格字体由 rebuildTableFonts 按
+// 当前窗口尺寸创建，故这里只初始化读数字体。
 func initFonts() {
 	fontReading, _ = walk.NewFont("Consolas", 30, walk.FontBold)
-	fontCell, _ = walk.NewFont("Consolas", tableFontSizePt, 0)
-	fontCellBold, _ = walk.NewFont("Consolas", tableFontSizePt, walk.FontBold)
-	// 时间/单位列比主字号小一档（用户要求"稍微小一点"）。
-	fontCellSmall, _ = walk.NewFont("Microsoft YaHei", 18, 0)
+}
+
+// rebuildTableFonts 按缩放系数重建表格相关字体（控件行高字体、数值粗体、
+// 小号字体）。walk 的 TableView 行高由控件字体决定，所以三者必须用同一个
+// scale 一起重建，否则放大后的文字会被未变高的行截断。
+func rebuildTableFonts(scale float64) {
+	ptBig := scaleInt(tableFontSizePt, scale) // 30pt 基准
+	ptSmall := scaleInt(18, scale)            // 时间/单位列基准 18pt
+	if ptBig < 8 {
+		ptBig = 8
+	}
+	if ptSmall < 7 {
+		ptSmall = 7
+	}
+	cell, _ := walk.NewFont("Consolas", ptBig, 0)
+	bold, _ := walk.NewFont("Consolas", ptBig, walk.FontBold)
+	small, _ := walk.NewFont("Microsoft YaHei", ptSmall, 0)
+
+	oldCell, oldBold, oldSmall := fontCell, fontCellBold, fontCellSmall
+	fontCell, fontCellBold, fontCellSmall = cell, bold, small
+	if oldCell != nil {
+		oldCell.Dispose()
+	}
+	if oldBold != nil {
+		oldBold.Dispose()
+	}
+	if oldSmall != nil {
+		oldSmall.Dispose()
+	}
+}
+
+func scaleInt(base int, scale float64) int {
+	v := float64(base) * scale
+	if v < 0 {
+		return 0
+	}
+	return int(v + 0.5)
 }
 
 // osVersion returns major.minor.build. Win7 = 6.1.xxxx.

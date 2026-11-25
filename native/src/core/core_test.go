@@ -7,6 +7,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"glcaliper/protocol"
 )
 
 func TestAppFeedHIDPipeline(t *testing.T) {
@@ -269,7 +271,7 @@ func protocolCSVHeadersCN() []string {
 
 func TestSettingsNormalizeOldAndInvalidValues(t *testing.T) {
 	d := DefaultSettings()
-	if d.IdleMinutes != 5 || d.NamePrefix != "GL-BLE#" || d.MaxCh != 7 {
+	if d.IdleMinutes != 5 || d.NamePrefix != "GL-BLE#" || d.MaxCh != 20 {
 		t.Errorf("defaults = %+v", d)
 	}
 	// simulate an old config with only legacy keys present.
@@ -288,7 +290,7 @@ func TestSettingsNormalizeOldAndInvalidValues(t *testing.T) {
 	// invalid explicit values
 	s2 := Settings{Digits: 99, MaxCh: 0, DebounceUM: -1, MaxMS: 0, Terminator: "X", Unit: "x", NamePrefix: "", IdleMinutes: -2}
 	s2.Normalize()
-	if s2.Digits != 2 || s2.MaxCh != 7 || s2.DebounceUM != 10 || s2.MaxMS != 300 ||
+	if s2.Digits != 2 || s2.MaxCh != 20 || s2.DebounceUM != 10 || s2.MaxMS != 300 ||
 		s2.Terminator != "ENTER" || s2.Unit != "mm" || s2.NamePrefix != "GL-BLE#" || s2.IdleMinutes != 5 {
 		t.Errorf("normalized invalid settings = %+v", s2)
 	}
@@ -324,3 +326,72 @@ func TestDeviceLabelFallback(t *testing.T) {
 	}
 }
 
+func TestDeviceNameInjection(t *testing.T) {
+	a := NewApp()
+	a.SetDeviceLabel("AA:BB:CC:DD:EE:FF")
+	a.SetDeviceName("  GL-BLE#1234  ") // trimmed on inject
+	// BLE: DeviceName is the advertising name; DeviceMAC stays the address.
+	a.FeedRaw("DAT0:m+10.00")
+	a.FlushPending()
+	a.SetChannel(2)
+	a.FeedHIDToken("15.00")
+	a.FeedDemoValue(20.5, 3)
+
+	recs := a.RecordsSnapshot()
+	if len(recs) != 3 {
+		t.Fatalf("records = %d, want 3", len(recs))
+	}
+	bySrc := map[string]protocol.Record{}
+	for _, r := range recs {
+		bySrc[r.Src] = r
+	}
+	// CSV/MES field untouched.
+	if bySrc["BLE"].DeviceMAC != "AA:BB:CC:DD:EE:FF" {
+		t.Errorf("BLE DeviceMAC changed to %q", bySrc["BLE"].DeviceMAC)
+	}
+	if bySrc["BLE"].DeviceName != "GL-BLE#1234" {
+		t.Errorf("BLE DeviceName = %q, want GL-BLE#1234", bySrc["BLE"].DeviceName)
+	}
+	// HID/DEMO keep a non-empty source tag so the column is never blank.
+	if bySrc["HID"].DeviceName != "HID" {
+		t.Errorf("HID DeviceName = %q", bySrc["HID"].DeviceName)
+	}
+	if bySrc["DEMO"].DeviceName != "DEMO" {
+		t.Errorf("DEMO DeviceName = %q", bySrc["DEMO"].DeviceName)
+	}
+}
+
+func TestChannelBleName(t *testing.T) {
+	a := NewApp()
+	s := a.GetSettings()
+	s.Channels[0].BleName = "  卡尺-A  " // trimmed
+	s.Channels[1].BleName = "   "      // blank -> empty
+	app2 := a
+	app2.SetSettings(s)
+
+	s2 := app2.GetSettings()
+	if got := s2.ChannelBleName(1); got != "卡尺-A" {
+		t.Errorf("ChannelBleName(1) = %q, want 卡尺-A", got)
+	}
+	if got := s2.ChannelBleName(2); got != "" {
+		t.Errorf("ChannelBleName(2) = %q, want empty (blank override)", got)
+	}
+	if got := s2.ChannelBleName(0); got != "" {
+		t.Errorf("ChannelBleName(0) = %q, want empty (out of range)", got)
+	}
+	if got := s2.ChannelBleName(99); got != "" {
+		t.Errorf("ChannelBleName(99) = %q, want empty (out of range)", got)
+	}
+}
+
+func TestDeviceNameFallsBackToMAC(t *testing.T) {
+	a := NewApp()
+	a.SetDeviceLabel("AA:BB:CC:DD:EE:FF")
+	// No name injected: BLE still shows a non-blank identifier.
+	a.FeedRaw("DAT0:m+10.00")
+	a.FlushPending()
+	recs := a.RecordsSnapshot()
+	if len(recs) != 1 || recs[0].DeviceName != "AA:BB:CC:DD:EE:FF" {
+		t.Fatalf("BLE fallback DeviceName = %q", recs[0].DeviceName)
+	}
+}

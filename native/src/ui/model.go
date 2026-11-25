@@ -36,10 +36,10 @@ type RecordModel struct {
 	// and filtered the entire record slice, which made large tables flicker
 	// badly while streaming. The cache is rebuilt at most once per change and
 	// is invalidated by a cheap signature check on every access.
-	viewCache    []protocol.Record
-	viewOrig     []int
-	viewKey      string
-	viewValid    bool
+	viewCache []protocol.Record
+	viewOrig  []int
+	viewKey   string
+	viewValid bool
 }
 
 // viewSignature captures everything that can change the visible view. It uses
@@ -205,21 +205,27 @@ func (m *RecordModel) Value(row, col int) interface{} {
 	case 0:
 		return r.T
 	case 1:
+		// 设备名称：设置里该通道的自定义蓝牙名优先（改名后即时生效，含已显示
+		// 的历史行）；未配置时回退到连接时读到的广播名 GL-BLE#XXX。
+		// HID/DEMO 记录携带来源标签，保证此单元格永不为空。
+		if n := m.app.GetSettings().ChannelBleName(r.Ch); n != "" {
+			return n
+		}
+		return r.DeviceName
+	case 2:
 		// Channel column follows the user-defined name (fallback CHn).
 		// The internal filter key stays CHn (see matchesFilterKey / rows()).
 		return m.app.GetSettings().ChannelName(r.Ch)
-	case 2:
+	case 3:
 		if m.unit == "inch" {
 			return fmt.Sprintf("%.4f", protocol.ToInch(r.ValueUM))
 		}
 		return fmt.Sprintf("%.*f", m.digits, protocol.ToMM(r.ValueUM))
-	case 3:
+	case 4:
 		// RawUnit is the protocol token ("m"|"i"); always show a friendly label.
 		return protocol.FriendlyUnit(r.RawUnit)
-	case 4:
-		return r.Verdict
 	case 5:
-		return r.Src
+		return r.Verdict
 	}
 	return ""
 }
@@ -234,19 +240,19 @@ func (m *RecordModel) StyleCell(style *walk.CellStyle) {
 		return
 	}
 	r := recs[row]
-	// 列字体：时间/通道/单位小一档（用户要求），实测值等宽粗体保持，行高由控件字体决定不受影响。
+	// 列字体：时间/设备名称/通道/单位小一档（用户要求），实测值等宽粗体保持，行高由控件字体决定不受影响。
 	switch col {
-	case 0, 1, 3: // 时间、通道、单位
+	case 0, 1, 2, 4: // 时间、设备名称、通道、单位
 		if fontCellSmall != nil {
 			style.Font = fontCellSmall
 		}
-	case 2: // 实测值（等宽粗体）
+	case 3: // 实测值（等宽粗体）
 		if fontCellBold != nil {
 			style.Font = fontCellBold
 		}
 	}
 	switch col {
-	case 4: // 判定
+	case 5: // 判定（原 4 列，设备名称插入后后移一位）
 		switch r.Verdict {
 		case "合格", "OK", "PASS":
 			style.BackgroundColor = colorOKPanel
@@ -255,14 +261,7 @@ func (m *RecordModel) StyleCell(style *walk.CellStyle) {
 			style.BackgroundColor = colorBadPanel
 			style.TextColor = colorBadText
 		}
-	case 5: // 来源
-		switch r.Src {
-		case "BLE":
-			style.TextColor = colorSrcBLE
-		case "HID":
-			style.TextColor = colorSrcHID
-		default:
-			style.TextColor = colorSrcDemo
-		}
 	}
+	// 注意：旧的 case 5（来源列分色）已删除。来源列从未在表格中显示，
+	// 且插入设备名称列后索引 5 已是判定列，若保留会覆盖判定的绿/红色块。
 }

@@ -104,10 +104,10 @@ func TestChannelDisplayNamesFollowSettingsAndKeepIndexMapping(t *testing.T) {
 	s.Channels[2].Name = "CH3" // already canonical: must not become "CH3 CH3"
 
 	names := channelDisplayNames(s)
-	if len(names) != 7 {
-		t.Fatalf("channelDisplayNames length = %d, want 7", len(names))
+	if len(names) != len(s.Channels) {
+		t.Fatalf("channelDisplayNames length = %d, want %d", len(names), len(s.Channels))
 	}
-	want := []string{"CH1 卡尺A", "CH2 卡尺B", "CH3", "CH4", "CH5", "CH6", "CH7"}
+	want := []string{"CH1 卡尺A", "CH2 卡尺B", "CH3"}
 	for i := range want {
 		if names[i] != want[i] {
 			t.Errorf("names[%d] = %q, want %q", i, names[i], want[i])
@@ -115,10 +115,10 @@ func TestChannelDisplayNamesFollowSettingsAndKeepIndexMapping(t *testing.T) {
 	}
 
 	scope := filterDisplayNames(s)
-	if len(scope) != 8 || scope[0] != "全部通道" {
-		t.Fatalf("filterDisplayNames = %v, want leading 全部通道 and 8 items", scope)
+	if len(scope) != len(names)+1 || scope[0] != "全部通道" {
+		t.Fatalf("filterDisplayNames = %v, want leading 全部通道 and %d items", scope, len(names)+1)
 	}
-	for i := 0; i < 7; i++ {
+	for i := 0; i < len(names); i++ {
 		if scope[i+1] != names[i] {
 			t.Errorf("scope[%d] = %q, want %q (index must still map to CH%d)", i+1, scope[i+1], names[i], i+1)
 		}

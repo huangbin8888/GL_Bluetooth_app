@@ -21,12 +21,16 @@ import (
 // this file so it can be backed out without touching data logic.
 
 const (
-	headerSmallPt = 16 // 其余列的表头字号（小一些）
-	headerBigPt   = 30 // 实测值表头：保持与控件字体一致的大字
-	headerMeasCol = 2  // 实测值列索引（0时间 1通道 2实测值 3单位 4判定）
+	headerSmallBasePt = 16 // 其余列的表头字号基准（小一些）
+	headerBigBasePt   = 30 // 实测值表头基准：与控件字体一致的大字
+	headerMeasCol     = 3  // 实测值列索引（0时间 1设备名称 2通道 3实测值 4单位 5判定）
 )
 
 var (
+	// 表头字号随窗口缩放，故用变量而非常量。
+	headerSmallPt = headerSmallBasePt
+	headerBigPt   = headerBigBasePt
+
 	headerFontSmall win.HFONT
 	headerFontBig   win.HFONT
 	headerHwnds     = make(map[win.HWND]bool)
@@ -50,6 +54,15 @@ func makeHeaderFont(face string, pointSize int, weight int32) win.HFONT {
 }
 
 var headerSubclassWndProc = syscall.NewCallback(func(hwnd win.HWND, msg uint32, wp, lp uintptr) uintptr {
+	// The ListViews are owner-data: every visible cell is fully repainted from
+	// the model on each draw, so the default WM_ERASEBKGND (which floods the
+	// client with the flat button-face colour) is both redundant and the source
+	// of the erase-then-refill flash. Suppress it unconditionally. With
+	// LVS_EX_DOUBLEBUFFER already set, the row repaint stays tear-free.
+	// Return TRUE = "background already handled".
+	if msg == win.WM_ERASEBKGND {
+		return 1
+	}
 	if msg == win.WM_NOTIFY && lp != 0 {
 		nmh := (*win.NMHDR)(unsafe.Pointer(lp))
 		if nmh.HwndFrom != 0 && headerHwnds[nmh.HwndFrom] && nmh.Code == win.NM_CUSTOMDRAW {
@@ -78,6 +91,39 @@ var headerSubclassWndProc = syscall.NewCallback(func(hwnd win.HWND, msg uint32, 
 	return 0
 })
 
+// rebuildHeaderFonts recreates the per-column header fonts at the current
+// scale and invalidates the header controls so they repaint with the new size.
+func rebuildHeaderFonts(scale float64) {
+	headerSmallPt = scaleInt(headerSmallBasePt, scale)
+	headerBigPt = scaleInt(headerBigBasePt, scale)
+	if headerSmallPt < 8 {
+		headerSmallPt = 8
+	}
+	if headerBigPt < 8 {
+		headerBigPt = 8
+	}
+	newSmall := makeHeaderFont("Microsoft YaHei", headerSmallPt, win.FW_NORMAL)
+	newBig := makeHeaderFont("Microsoft YaHei", headerBigPt, win.FW_NORMAL)
+	if newSmall == 0 || newBig == 0 {
+		return
+	}
+	if headerFontSmall != 0 {
+		win.DeleteObject(win.HGDIOBJ(headerFontSmall))
+	}
+	if headerFontBig != 0 {
+		win.DeleteObject(win.HGDIOBJ(headerFontBig))
+	}
+	headerFontSmall, headerFontBig = newSmall, newBig
+
+	// Force the header controls to repaint with the new fonts.
+	// bErase=false: the header's NM_CUSTOMDRAW repaints the entire item row,
+	// so a background erase is unnecessary and — on a maximized window where
+	// resize reflow is frequent — the WM_ERASEBKGND flash is visible.
+	for h := range headerHwnds {
+		win.InvalidateRect(h, nil, false)
+	}
+}
+
 // initHeaderPainting sets up per-column header fonts. Must run after
 // initTablePainting has cached the internal ListView handles.
 func (u *UI) initHeaderPainting() {
@@ -100,6 +146,25 @@ func (u *UI) initHeaderPainting() {
 			orig := win.SetWindowLongPtr(lv, win.GWLP_WNDPROC, headerSubProc)
 			if orig != 0 {
 				lvOrigProc[lv] = orig
+			}
+		}
+	}
+	// walk's TableView.Invalidate() invalidates BOTH internal ListViews AND
+	// the parent widget (WidgetBase.Invalidate) with bErase=true. The parent's
+	// WM_ERASEBKGND floods the whole table area with COLOR_BTNFACE before the
+	// owner-data rows refill it — a visible grey flash on a maximized window.
+	// Subclass the parent too so the same WM_ERASEBKGND guard applies. The
+	// shared WndProc forwards every other message to the real procedure, and
+	// the header NM_CUSTOMDRAW branch is keyed on header HWNDs, so the parent
+	// is unaffected by it.
+	if u.tableView != nil {
+		parent := u.tableView.Handle()
+		if parent != 0 {
+			if _, done := lvOrigProc[parent]; !done {
+				orig := win.SetWindowLongPtr(parent, win.GWLP_WNDPROC, headerSubProc)
+				if orig != 0 {
+					lvOrigProc[parent] = orig
+				}
 			}
 		}
 	}

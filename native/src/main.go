@@ -18,16 +18,32 @@ import (
 // bridge implements ui.DeviceBridge using the real HID/BLE hardware modules.
 type bridge struct {
 	mu         sync.Mutex
-	hid        *hid.Capture
+	hid        *hid.Capture    // legacy WH_KEYBOARD_LL fallback (no device id)
+	raw        *hid.RawCapture // preferred: WM_INPUT with device fingerprint
 	ble        *ble.Client
 	app        *core.App
 	ui         *ui.UI
 	namePrefix string // latest scan-name prefix from settings
 }
 
+// HIDStart prefers Raw Input (carries a per-device fingerprint for automatic
+// channel filing). If Raw Input cannot initialise, it falls back to the legacy
+// global keyboard hook, which still captures readings into the current channel.
 func (b *bridge) HIDStart() error {
+	term := b.app.GetSettings().Terminator
+	if b.raw == nil {
+		b.raw = hid.NewRaw(term, func(token, fp string) {
+			b.app.FeedHIDTokenWithDevice(token, fp)
+			b.ui.OnHidChar("[✓]")
+		})
+	}
+	if err := b.raw.Start(); err == nil {
+		return nil
+	}
+	// Raw Input unavailable: use the legacy hook path.
+	b.raw = nil
 	if b.hid == nil {
-		b.hid = hid.New(b.app.GetSettings().Terminator,
+		b.hid = hid.New(term,
 			func(token string) {
 				b.app.FeedHIDToken(token)
 				b.ui.OnHidChar("[✓]")
@@ -37,20 +53,44 @@ func (b *bridge) HIDStart() error {
 	return b.hid.Start()
 }
 func (b *bridge) HIDStop() {
+	if b.raw != nil {
+		b.raw.Stop()
+	}
 	if b.hid != nil {
 		b.hid.Stop()
 	}
 }
-func (b *bridge) HIDEnabled() bool { return b.hid != nil && b.hid.IsEnabled() }
+func (b *bridge) HIDEnabled() bool {
+	return (b.raw != nil && b.raw.IsEnabled()) || (b.hid != nil && b.hid.IsEnabled())
+}
+// HIDIsRaw reports whether the active capture carries device fingerprints.
+// False means the fallback global hook is in use (no automatic channel filing).
+func (b *bridge) HIDIsRaw() bool {
+	return b.raw != nil && b.raw.IsEnabled()
+}
 func (b *bridge) HIDSetTerminator(t string) {
+	if b.raw != nil {
+		b.raw.SetTerminator(t)
+	}
 	if b.hid != nil {
 		b.hid.SetTerminator(t)
 	}
 }
 func (b *bridge) HIDClearBuffer() {
+	if b.raw != nil {
+		b.raw.ClearBuffer()
+	}
 	if b.hid != nil {
 		b.hid.ClearBuffer()
 	}
+}
+func (b *bridge) HIDListDevices() []ui.HIDDeviceInfo {
+	devs := hid.ListHIDDevices()
+	out := make([]ui.HIDDeviceInfo, len(devs))
+	for i, d := range devs {
+		out[i] = ui.HIDDeviceInfo{Fingerprint: d.Fingerprint}
+	}
+	return out
 }
 
 func (b *bridge) BLEAvailable() bool { return ble.Available() }

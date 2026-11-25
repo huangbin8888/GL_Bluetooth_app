@@ -18,7 +18,8 @@ func (u *UI) pageDetect() TabPage {
 		Children: []Widget{
 			// ---- left: reading + live table ----
 			Composite{
-				Layout: VBox{MarginsZero: true, Spacing: 8},
+				StretchFactor: 1, // take all horizontal space left by the fixed-width dock
+				Layout:        VBox{MarginsZero: true, Spacing: 8},
 				Children: []Widget{
 					// reading banner — 深色仪表盘：琥珀等宽大读数
 					Composite{
@@ -60,9 +61,11 @@ func (u *UI) pageDetect() TabPage {
 						AssignTo:         &u.tableView,
 						Model:            u.model,
 						AlternatingRowBG: true,
+						StretchFactor:    1, // grow with the window so the list fills on maximize
 						Font:             Font{Family: "Microsoft YaHei", PointSize: tableFontSizePt},
 						Columns: []TableViewColumn{
 							{Title: "时间", Width: 170, Alignment: AlignCenter},
+							{Title: "设备名称", Width: 200, Alignment: AlignCenter},
 							{Title: "通道", Width: 340, Alignment: AlignCenter},
 							{Title: "实测值", Width: 190, Alignment: AlignCenter},
 							{Title: "单位", Width: 130, Alignment: AlignCenter},
@@ -197,7 +200,11 @@ func (u *UI) onHidToggle() {
 		}
 		u.btnHidToggle.SetText("关闭 HID 全局捕获")
 		u.lblHidLive.SetText("等待读数…")
-		u.setStatus("HID 全局捕获已开启（任意界面录入）")
+		if u.bridge.HIDIsRaw() {
+			u.setStatus("HID 已开启（Raw Input：按设备指纹自动归档）")
+		} else {
+			u.setStatus("HID 已开启（普通键盘钩子回退：无法自动分通道，需手动选通道）")
+		}
 	}
 }
 

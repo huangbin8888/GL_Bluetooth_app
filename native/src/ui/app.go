@@ -9,6 +9,8 @@ import (
 	"github.com/lxn/walk"
 	. "github.com/lxn/walk/declarative"
 	"glcaliper/core"
+	"glcaliper/mes"
+	"glcaliper/protocol"
 )
 
 // DeviceBridge abstracts HID/BLE hardware control so the UI never imports
@@ -18,8 +20,10 @@ type DeviceBridge interface {
 	HIDStart() error
 	HIDStop()
 	HIDEnabled() bool
+	HIDIsRaw() bool // true when Raw Input (per-device fingerprint) is active
 	HIDSetTerminator(string)
 	HIDClearBuffer()
+	HIDListDevices() []HIDDeviceInfo // Raw Input keyboard devices with fingerprints
 
 	// BLE
 	BLEAvailable() bool
@@ -38,6 +42,12 @@ type DeviceView struct {
 	RSSI    int16
 }
 
+// HIDDeviceInfo is one keyboard-class HID device with its Raw Input
+// fingerprint, surfaced by the settings self-check button.
+type HIDDeviceInfo struct {
+	Fingerprint string
+}
+
 // UI owns all controls and wires them to core + bridge.
 type UI struct {
 	app    *core.App
@@ -49,27 +59,27 @@ type UI struct {
 	tabWidget *walk.TabWidget
 
 	// dynamic controls
-	lblReading   *walk.Label
-	lblUnit      *walk.Label
-	lblMode      *walk.Label
-	lblEnv       *walk.Label
-	lblEnvDetail *walk.Label
-	lblStatus    *walk.StatusBarItem
-	lblStatus2   *walk.StatusBarItem
-	tableView    *walk.TableView
-	lblCount     *walk.Label
-	lblStats     *walk.Label
-	lblHidState  *walk.Label
-	lblHidLive   *walk.Label
-	btnHidToggle *walk.PushButton
-	btnDemo      *walk.PushButton
-	btnScan      *walk.PushButton
-	btnConnect   *walk.PushButton
+	lblReading    *walk.Label
+	lblUnit       *walk.Label
+	lblMode       *walk.Label
+	lblEnv        *walk.Label
+	lblEnvDetail  *walk.Label
+	lblStatus     *walk.StatusBarItem
+	lblStatus2    *walk.StatusBarItem
+	tableView     *walk.TableView
+	lblCount      *walk.Label
+	lblStats      *walk.Label
+	lblHidState   *walk.Label
+	lblHidLive    *walk.Label
+	btnHidToggle  *walk.PushButton
+	btnDemo       *walk.PushButton
+	btnScan       *walk.PushButton
+	btnConnect    *walk.PushButton
 	btnDisconnect *walk.PushButton
-	lblDevices   *walk.Label
-	lstDevices   *walk.ListBox
-	cmbChannel   *walk.ComboBox
-	cmbFilter    *walk.ComboBox
+	lblDevices    *walk.Label
+	lstDevices    *walk.ListBox
+	cmbChannel    *walk.ComboBox
+	cmbFilter     *walk.ComboBox
 
 	// analysis labels
 	anTotal *walk.Label
@@ -102,11 +112,14 @@ type UI struct {
 	btnChartKind   *walk.PushButton
 	cmbChartFilter *walk.ComboBox
 
-	// settings: per-channel name + independent tolerance
-	edChName   [7]*walk.LineEdit
-	ckChUseTol [7]*walk.CheckBox
-	edChLower  [7]*walk.LineEdit
-	edChUpper  [7]*walk.LineEdit
+	// settings: per-channel name + Bluetooth name + independent tolerance
+	edChName    [protocol.MaxChannels]*walk.LineEdit
+	edChBleName [protocol.MaxChannels]*walk.LineEdit
+	ckChUseTol  [protocol.MaxChannels]*walk.CheckBox
+	edChLower   [protocol.MaxChannels]*walk.LineEdit
+	edChUpper   [protocol.MaxChannels]*walk.LineEdit
+	// settings: per-channel bound HID device fingerprint (read-only display)
+	lblChHidFp [protocol.MaxChannels]*walk.Label
 
 	// settings: alert / link / device registration
 	ckAlertOnBad     *walk.CheckBox
@@ -115,8 +128,19 @@ type UI struct {
 	edIdleMinutes    *walk.LineEdit
 	edNamePrefix     *walk.LineEdit
 
+	// settings: MES upload
+	ckMESEnable  *walk.CheckBox
+	edMESURL     *walk.LineEdit
+	edMESToken   *walk.LineEdit
+	edMESPrefix  *walk.LineEdit
+	edMESTimeout *walk.LineEdit
+	edMESRetry   *walk.LineEdit
+	cmbMESScope  *walk.ComboBox
+	lblMESStatus *walk.Label
+
 	deviceList  []string // display strings for ListBox
 	deviceAddrs []string // matching addresses
+	deviceNames []string // matching Bluetooth advertising names (GL-BLE#XXX)
 }
 
 // New creates the UI bound to app + bridge.
@@ -125,6 +149,7 @@ func New(app *core.App, bridge DeviceBridge) *UI {
 		app: app, bridge: bridge,
 		deviceList:  make([]string, 0),
 		deviceAddrs: make([]string, 0),
+		deviceNames: make([]string, 0),
 	}
 }
 
@@ -159,11 +184,23 @@ func (u *UI) Run() error {
 	u.chartFilter = ""
 	u.chartData = core.ChartData{Points: make([]core.ChartPoint, 0), UnitLabel: "mm"}
 
+	// Start MES uploader from persisted settings before any record can arrive.
+	u.app.ConfigureMES(s)
+
 	u.app.OnChange(func(c core.Change) {
 		if u.main == nil {
 			return
 		}
 		u.main.Synchronize(func() { u.onChange(c) })
+	})
+
+	// MES upload status arrives on the uploader's worker goroutine; marshal it
+	// to the UI thread before touching labels.
+	u.app.OnMESStatus(func(st mes.Status) {
+		if u.main == nil {
+			return
+		}
+		u.main.Synchronize(func() { u.onMESStatus(st) })
 	})
 
 	statusItem := walk.NewStatusBarItem()
@@ -173,8 +210,8 @@ func (u *UI) Run() error {
 	mw := &MainWindow{
 		AssignTo: &u.main,
 		Title:    title,
-		MinSize:  Size{1020, 660},
-		Size:     Size{1240, 800},
+		MinSize:  Size{760, 480},
+		Size:     Size{1180, 720},
 		Layout:   VBox{MarginsZero: true, SpacingZero: true},
 		StatusBarItems: []StatusBarItem{
 			{AssignTo: &u.lblStatus, Text: "就绪", Width: 380},
@@ -194,7 +231,8 @@ func (u *UI) Run() error {
 				},
 			},
 			TabWidget{
-				AssignTo: &u.tabWidget,
+				AssignTo:      &u.tabWidget,
+				StretchFactor: 1, // fill all vertical space left by the header
 				Pages: []TabPage{
 					u.pageDetect(),
 					u.pageConnect(),
@@ -242,6 +280,12 @@ func (u *UI) onChange(c core.Change) {
 		u.refreshReading()
 		u.refreshCountStats()
 		u.lblStatus.SetText(c.Text)
+	case "hidbind":
+		// A new device fingerprint was auto-learned: persist it and refresh the
+		// per-channel binding labels so the settings page reflects the change.
+		u.SaveSettingsNow()
+		u.refreshHIDBindingLabels()
+		u.lblStatus.SetText(c.Text)
 	}
 }
 
@@ -273,5 +317,5 @@ func (u *UI) fmtMM(um int64) string {
 	return fmt.Sprintf("%.*f mm", s.Digits, protocolToMM(um))
 }
 
-func protocolToMM(um int64) float64  { return float64(um) / 1000.0 }
+func protocolToMM(um int64) float64   { return float64(um) / 1000.0 }
 func protocolToInch(um int64) float64 { return float64(um) / 25400.0 }

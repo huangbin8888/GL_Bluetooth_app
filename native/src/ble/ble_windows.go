@@ -3,15 +3,19 @@
 // Package ble wraps tinygo.org/x/bluetooth (whose Windows backend uses WinRT)
 // to scan/connect Guanglu GL-BLE# calipers, subscribe to ffb2 notifications and
 // acknowledge commands. On Win7 the WinRT APIs are absent, so Enable()/Scan()
-// fail and the caller falls back to HID capture automatically.
+// fail; the caller then prompts the user to switch to HID capture mode, which
+// provides the same live readings without WinRT.
 package ble
 
 import (
 	"errors"
+	"reflect"
 	"strings"
 	"sync"
 	"time"
+	"unsafe"
 
+	winrtbt "github.com/saltosystems/winrt-go/windows/devices/bluetooth"
 	"tinygo.org/x/bluetooth"
 )
 
@@ -29,23 +33,30 @@ type DeviceInfo struct {
 
 // Client manages BLE scanning and a single active connection.
 type Client struct {
-	mu        sync.Mutex
-	adapter   *bluetooth.Adapter
-	scanning  bool
-	device    bluetooth.Device
-	connected bool
+	mu         sync.Mutex
+	adapter    *bluetooth.Adapter
+	scanning   bool
+	device     bluetooth.Device
+	connected  bool
 	notifyChar bluetooth.DeviceCharacteristic
-	onData    func(string) // raw notify payload as string
-	onStatus  func(string)
+	onData     func(string) // raw notify payload as string
+	onStatus   func(string)
 	namePrefix string // advertised-name prefix used by Scan() filtering
+
+	// probeLink reports whether the physical link is gone. When nil, the real
+	// WinRT connection-status query is used. Tests inject a deterministic stub
+	// so the disconnect→convergence state machine can be verified without a
+	// physical BLE radio. The bool result is the detected lost state; a nil
+	// probe on a zero device is treated conservatively (not lost).
+	probeLink func(bluetooth.Device) bool
 }
 
 // New creates a BLE client.
 func New(onData func(string), onStatus func(string)) *Client {
 	return &Client{
-		adapter:  bluetooth.DefaultAdapter,
-		onData:   onData,
-		onStatus: onStatus,
+		adapter:    bluetooth.DefaultAdapter,
+		onData:     onData,
+		onStatus:   onStatus,
 		namePrefix: "GL-BLE#",
 	}
 }
@@ -227,21 +238,93 @@ func (c *Client) Write(cmd string) error {
 
 // Disconnect closes the active connection.
 func (c *Client) Disconnect() {
+	c.disconnectWithStatus("已断开")
+}
+
+// disconnectWithStatus tears down whatever connection state exists and reports
+// the given status. It is the single convergence point for both an explicit
+// Disconnect and a detected physical link loss, so no path can leave
+// connected=true while the underlying device is gone.
+func (c *Client) disconnectWithStatus(statusText string) {
 	c.mu.Lock()
 	dev := c.device
 	connected := c.connected
 	c.device = bluetooth.Device{}
 	c.notifyChar = bluetooth.DeviceCharacteristic{}
 	c.connected = false
-	c.mu.Unlock()
-	if connected {
+	// Release the WinRT object while holding the lock. This serialises with
+	// IsConnected's GetConnectionStatus poll below so it can never touch a
+	// device that has already been released.
+	// A zero device (e.g. a test stub that injected a lost link without a
+	// real COM object) has no WinRT handle to release; calling Disconnect on
+	// it would dereference a nil COM pointer and crash. Only release a real
+	// WinRT device object.
+	if connected && nativeLEDebugDevice(dev) != nil {
 		_ = dev.Disconnect()
-		c.status("已断开")
+	}
+	c.mu.Unlock()
+	// Only report a status when there was a real state change. Repeated
+	// Disconnect calls (watchdog + manual button) must not churn the UI.
+	if connected {
+		c.status(statusText)
 	}
 }
 
+// nativeLEDebugDevice exposes the underlying WinRT BluetoothLEDevice so the
+// physical link state can be polled. tinygo v0.10.0 deliberately hides it in
+// an unexported field (`device`) of bluetooth.Device; reflection is used here
+// rather than forking the dependency. Returns nil when the layout changes or
+// no WinRT object is present, in which case callers fall back to the local
+// connected flag instead of reporting a false disconnect.
+func nativeLEDebugDevice(d bluetooth.Device) *winrtbt.BluetoothLEDevice {
+	v := reflect.ValueOf(d)
+	f := v.FieldByName("device")
+	if !f.IsValid() || f.Kind() != reflect.Ptr || f.IsNil() {
+		return nil
+	}
+	return (*winrtbt.BluetoothLEDevice)(unsafe.Pointer(f.Pointer()))
+}
+
+// IsConnected reports whether the BLE link is still alive. It combines the
+// local connection flag with the WinRT connection status: tinygo's notification
+// callback carries no link-loss event, so a device that is switched off or
+// walks out of range would otherwise leave connected=true forever (a state
+// the idle watchdog and Write checks would act on incorrectly). If WinRT
+// reports the link is gone, the local state is converged and a status message
+// is emitted. If the WinRT object is unavailable, we conservatively trust the
+// local flag and never fabricate a disconnect.
 func (c *Client) IsConnected() bool {
 	c.mu.Lock()
-	defer c.mu.Unlock()
-	return c.connected
+	if !c.connected {
+		c.mu.Unlock()
+		return false
+	}
+	// Poll the link state while holding the lock: it serialises with
+	// disconnectWithStatus releasing the device object, so the COM pointer is
+	// guaranteed valid for the duration of this call.
+	lost := c.probeLinkLocked()
+	c.mu.Unlock()
+
+	if lost {
+		c.disconnectWithStatus("设备已断开连接")
+		return false
+	}
+	return true
+}
+
+// probeLinkLocked performs the physical link probe. Caller must hold c.mu.
+func (c *Client) probeLinkLocked() bool {
+	if c.probeLink != nil {
+		return c.probeLink(c.device)
+	}
+	le := nativeLEDebugDevice(c.device)
+	if le == nil {
+		// WinRT object unavailable: never fabricate a disconnect.
+		return false
+	}
+	st, err := le.GetConnectionStatus()
+	// An error means the COM object is no longer usable, which in practice
+	// accompanies a physical disconnect. Only a clean Connected result keeps
+	// the link alive.
+	return err != nil || st == winrtbt.BluetoothConnectionStatusDisconnected
 }
