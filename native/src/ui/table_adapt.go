@@ -57,6 +57,40 @@ const refTableWidth = 1150 // baseline sum of the 6 column widths (96-DPI px)
 // baseline column widths, in order: 时间/设备名称/通道/实测值/单位/判定
 var baseColWidths = [...]int{170, 200, 340, 190, 130, 120}
 
+// verdictCol 是判定列索引。判定列内容是固定的"合格/超差"两字，且沿用行高
+// 大字体（不随其他小字列一起缩小），因此需要单独保证一个内容宽度下限。
+const verdictCol = 5
+
+// verdictMinWidth 返回判定列在当前字体缩放下恰好容纳两字所需的宽度。
+// 列宽按无下界 colScale 缩放、字体按下界 minTableScale 缩放；小窗口时列宽
+// 会缩得比字体更狠而把"合格/超差"截断。此下限让判定列跟随字体的有下界缩放，
+// 只取内容本身所需宽度（两字 + 左右各 8px 内边距），不过度加宽。
+func verdictMinWidth(fontScale float64) int {
+	pt := scaleInt(tableFontSizePt, fontScale)
+	return pt*8/3 + 16 // 中文字宽≈pt*4/3，两字；+16 = 左右各 8px padding
+}
+
+// columnWidths computes the six column widths for the available table width.
+// Pure so it can be unit-tested without a GUI; adaptTable applies the result.
+func columnWidths(avail int) []int {
+	colScale := rawTableScale(avail)
+	fontScale := tableScaleForWidth(avail)
+	out := make([]int, len(baseColWidths))
+	for i, base := range baseColWidths {
+		w := scaleInt(base, colScale)
+		if w < 24 {
+			w = 24
+		}
+		if i == verdictCol {
+			if need := verdictMinWidth(fontScale); w < need {
+				w = need
+			}
+		}
+		out[i] = w
+	}
+	return out
+}
+
 const (
 	minTableScale = 0.45
 	maxTableScale = 1.6
@@ -143,7 +177,6 @@ func (u *UI) adaptTable() {
 		return
 	}
 	scale := tableScaleForWidth(avail) // bounded, for fonts
-	colScale := rawTableScale(avail)   // unbounded, so columns fill exactly
 	fontChanged := lastTableScale == 0 || absFloat(scale-lastTableScale) >= 0.02
 	colChanged := lastColPx == 0 || absInt(px-lastColPx) >= 8
 	if !fontChanged && !colChanged {
@@ -158,11 +191,7 @@ func (u *UI) adaptTable() {
 	if colChanged {
 		cols := u.tableView.Columns()
 		if cols != nil && cols.Len() == len(baseColWidths) {
-			for i, base := range baseColWidths {
-				w := scaleInt(base, colScale)
-				if w < 24 {
-					w = 24
-				}
+			for i, w := range columnWidths(avail) {
 				_ = cols.At(i).SetWidth(w)
 			}
 		}

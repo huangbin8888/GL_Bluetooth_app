@@ -60,3 +60,39 @@ func TestColumnWidthsScaleToFill(t *testing.T) {
 		t.Errorf("scaled widths sum %d, want ~%d", got, avail)
 	}
 }
+
+// TestVerdictColumnFitsContentInSmallWindow guards the "判定显示不全" fix:
+// the verdict cell uses the large row font, so in a small window its column
+// must not shrink below the width needed for two Chinese glyphs. The floor
+// follows the (bounded) font scale and never exceeds content width by much.
+func TestVerdictColumnFitsContentInSmallWindow(t *testing.T) {
+	for _, avail := range []int{240, 300, 400, 575, 1150} {
+		widths := columnWidths(avail)
+		if len(widths) != len(baseColWidths) {
+			t.Fatalf("avail=%d: got %d columns", avail, len(widths))
+		}
+		need := verdictMinWidth(tableScaleForWidth(avail))
+		if got := widths[verdictCol]; got < need {
+			t.Errorf("avail=%d: verdict width %d < content need %d (text would be clipped)", avail, got, need)
+		}
+	}
+	// At the smallest font scale two glyphs still fit; the floor is content-sized,
+	// not an arbitrary wide value (<= 3 glyph widths including padding).
+	pt := scaleInt(tableFontSizePt, minTableScale)
+	need := verdictMinWidth(minTableScale)
+	if need < pt*2 { // two glyphs at the small font size
+		t.Errorf("verdict floor %d too small for two %dpt glyphs", need, pt)
+	}
+	if need > pt*8/3+32 {
+		t.Errorf("verdict floor %d wider than content warrants", need)
+	}
+}
+
+// TestVerdictColumnNotWiderAtBaseline ensures the floor never widens the
+// verdict column when the proportional width is already sufficient.
+func TestVerdictColumnNotWiderAtBaseline(t *testing.T) {
+	widths := columnWidths(refTableWidth)
+	if got, want := widths[verdictCol], baseColWidths[verdictCol]; got != want {
+		t.Errorf("baseline verdict width = %d, want unchanged %d", got, want)
+	}
+}
