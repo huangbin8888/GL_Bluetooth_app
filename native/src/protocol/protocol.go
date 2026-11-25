@@ -29,10 +29,11 @@ var CSVHeaders = []string{
 	"SOURCE", "DEVICE_MAC", "NOTE", "CHANNEL",
 }
 
-// CSVHeadersCN is the 7-column Chinese header used for EXPORT only.
+// CSVHeadersCN is the 8-column Chinese header used for EXPORT only.
 // The canonical keys below are what CsvParse maps them to via aliases.
+// The last column "是否合格" carries the plain-text verdict (合格/超差).
 var CSVHeadersCN = []string{
-	"日期", "时间", "设备名称", "测量值", "公差上限", "公差下限", "通道名称",
+	"日期", "时间", "设备名称", "测量值", "公差上限", "公差下限", "通道名称", "是否合格",
 }
 
 var aliases = map[string]string{
@@ -41,9 +42,10 @@ var aliases = map[string]string{
 	"上偏差": "UPPER_TOL", "实测值": "VALUE_MM", "测量值": "VALUE_MM",
 	"原始值": "RAW_VALUE", "原始单位": "RAW_UNIT", "判定": "VERDICT",
 	"来源": "SOURCE", "设备MAC": "DEVICE_MAC", "备注": "NOTE", "通道": "CHANNEL",
-	// New 7-column Chinese headers — required for export -> import roundtrip.
+	// Chinese export headers — required for export -> import roundtrip.
 	"设备名称": "DEVICE_MAC", "公差上限": "UPPER_TOL",
 	"公差下限": "LOWER_TOL", "通道名称": "CHANNEL",
+	"是否合格": "VERDICT", // 8th export column; roundtrips as VERDICT
 }
 
 var (
@@ -634,32 +636,111 @@ func channelLabel(ch int, names []string) string {
 	return "CH" + strconv.Itoa(ch)
 }
 
+// exportRowValues returns the 8 display cells for one record, aligned with
+// CSVHeadersCN. Shared by RecordsToCsv and RecordsToXls so the two formats
+// always carry exactly the same content and column order.
+func exportRowValues(r Record, meta CSVMeta) []string {
+	lo, hi := meta.LowerUM, meta.UpperUM
+	if meta.ResolveTol != nil {
+		lo, hi = meta.ResolveTol(r.Ch)
+	}
+	verdict := r.Verdict
+	if verdict == "" {
+		verdict = Verdict(r.ValueUM, lo, hi)
+	}
+	row := map[string]string{
+		"DATE": r.Date, "TIME": r.T,
+		"DEVICE_MAC": r.DeviceMAC,
+		"VALUE_MM":   FmtMM(r.ValueUM, 4),
+		"UPPER_TOL":  FmtMM(hi, 4),
+		"LOWER_TOL":  FmtMM(lo, 4),
+		"CHANNEL":    channelLabel(r.Ch, meta.ChannelNames),
+		"VERDICT":    verdict,
+	}
+	cells := make([]string, len(CSVHeadersCN))
+	for j, k := range CSVHeadersCN {
+		cells[j] = row[mustCanonical(k)]
+	}
+	return cells
+}
+
 // RecordsToCsv renders records into a BOM-prefixed RFC-4180 CSV string with
-// the Chinese 7-column layout. Tolerance values are absolute millimetres for
+// the Chinese 8-column layout. Tolerance values are absolute millimetres for
 // the record's own channel (via ResolveTol), never a hard-coded global value.
+// The final "是否合格" column is plain text (合格/超差); CSV cannot carry colour.
 func RecordsToCsv(recs []Record, meta CSVMeta) string {
 	lines := make([]string, 0, len(recs)+1)
 	lines = append(lines, strings.Join(CSVHeadersCN, ","))
 	for _, r := range recs {
-		lo, hi := meta.LowerUM, meta.UpperUM
-		if meta.ResolveTol != nil {
-			lo, hi = meta.ResolveTol(r.Ch)
-		}
-		row := map[string]string{
-			"DATE": r.Date, "TIME": r.T,
-			"DEVICE_MAC": r.DeviceMAC,
-			"VALUE_MM":   FmtMM(r.ValueUM, 4),
-			"UPPER_TOL":  FmtMM(hi, 4),
-			"LOWER_TOL":  FmtMM(lo, 4),
-			"CHANNEL":    channelLabel(r.Ch, meta.ChannelNames),
-		}
-		cells := make([]string, len(CSVHeadersCN))
-		for j, k := range CSVHeadersCN {
-			cells[j] = csvEscape(row[mustCanonical(k)])
+		cells := exportRowValues(r, meta)
+		for j := range cells {
+			cells[j] = csvEscape(cells[j])
 		}
 		lines = append(lines, strings.Join(cells, ","))
 	}
 	return "\ufeff" + strings.Join(lines, "\r\n") + "\r\n"
+}
+
+// xmlEscape escapes the five XML predefined entities for SpreadsheetML text.
+func xmlEscape(v string) string {
+	v = strings.ReplaceAll(v, "&", "&amp;")
+	v = strings.ReplaceAll(v, "<", "&lt;")
+	v = strings.ReplaceAll(v, ">", "&gt;")
+	v = strings.ReplaceAll(v, "\"", "&quot;")
+	v = strings.ReplaceAll(v, "'", "&apos;")
+	return v
+}
+
+// RecordsToXls renders the same 8-column Chinese layout as an Excel 2003 XML
+// Spreadsheet (SpreadsheetML). Excel/WPS open it directly as a native .xls and
+// keep the per-cell colours: the final "是否合格" cell is green for 合格 and
+// red for 超差. Pure standard library, no third-party dependency.
+func RecordsToXls(recs []Record, meta CSVMeta) string {
+	var b strings.Builder
+	b.WriteString("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n")
+	b.WriteString("<?mso-application progid=\"Excel.Sheet\"?>\r\n")
+	b.WriteString("<Workbook xmlns=\"urn:schemas-microsoft-com:office:spreadsheet\"")
+	b.WriteString(" xmlns:o=\"urn:schemas-microsoft-com:office:office\"")
+	b.WriteString(" xmlns:x=\"urn:schemas-microsoft-com:office:excel\"")
+	b.WriteString(" xmlns:ss=\"urn:schemas-microsoft-com:office:spreadsheet\">\r\n")
+	b.WriteString(" <Styles>\r\n")
+	b.WriteString("  <Style ss:ID=\"sPass\"><Interior ss:Color=\"#C6EFCE\" ss:Pattern=\"Solid\"/><Font ss:Color=\"#006100\"/></Style>\r\n")
+	b.WriteString("  <Style ss:ID=\"sFail\"><Interior ss:Color=\"#FFC7CE\" ss:Pattern=\"Solid\"/><Font ss:Color=\"#9C0006\"/></Style>\r\n")
+	b.WriteString(" </Styles>\r\n")
+	b.WriteString(" <Worksheet ss:Name=\"记录\">\r\n")
+	b.WriteString("  <Table>\r\n")
+	widths := []string{"90", "84", "180", "96", "96", "96", "140", "88"}
+	for _, w := range widths {
+		b.WriteString("   <Column ss:Width=\"" + w + "\"/>\r\n")
+	}
+	// Header row.
+	b.WriteString("   <Row>\r\n")
+	for _, h := range CSVHeadersCN {
+		b.WriteString("    <Cell><Data ss:Type=\"String\">" + xmlEscape(h) + "</Data></Cell>\r\n")
+	}
+	b.WriteString("   </Row>\r\n")
+	// Data rows: cells stored as String to preserve the exact CSV display text.
+	for _, r := range recs {
+		cells := exportRowValues(r, meta)
+		b.WriteString("   <Row>\r\n")
+		for j, v := range cells {
+			style := ""
+			if j == len(cells)-1 {
+				switch v {
+				case "合格":
+					style = " ss:StyleID=\"sPass\""
+				case "超差":
+					style = " ss:StyleID=\"sFail\""
+				}
+			}
+			b.WriteString("    <Cell" + style + "><Data ss:Type=\"String\">" + xmlEscape(v) + "</Data></Cell>\r\n")
+		}
+		b.WriteString("   </Row>\r\n")
+	}
+	b.WriteString("  </Table>\r\n")
+	b.WriteString(" </Worksheet>\r\n")
+	b.WriteString("</Workbook>\r\n")
+	return b.String()
 }
 
 // mustCanonical maps a Chinese export header to its canonical parse key.

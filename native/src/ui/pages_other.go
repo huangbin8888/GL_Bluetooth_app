@@ -210,27 +210,39 @@ func (u *UI) pageExport() TabPage {
 		Title:  "导出到本地",
 		Layout: VBox{Margins: Margins{14, 14, 14, 14}, Spacing: 12},
 		Children: []Widget{
-			Label{Text: "导出当前记录为 CSV（UTF-8 BOM，Excel 直接打开）", Font: Font{PointSize: 12, Bold: true}},
-			Label{Text: "中文 7 列：日期 / 时间 / 设备名称 / 测量值 / 公差上限 / 公差下限 / 通道名称（绝对 mm）", TextColor: colorSub},
+			Label{Text: "导出当前记录", Font: Font{PointSize: 12, Bold: true}},
+			Label{Text: "中文 8 列：日期 / 时间 / 设备名称 / 测量值 / 公差上限 / 公差下限 / 通道名称 / 是否合格", TextColor: colorSub},
 			Composite{
 				Layout: HBox{Spacing: 10},
 				Children: []Widget{
 					Label{Text: "范围", TextColor: colorSub},
 					ComboBox{AssignTo: &u.exportScope, Editable: false, Value: int(0), Model: filterDisplayNames(u.app.GetSettings())},
-					PushButton{Text: "选择位置并导出…", OnClicked: u.onExportCsv, MinSize: Size{180, 32}},
 				},
 			},
+			Composite{
+				Layout: HBox{Spacing: 10},
+				Children: []Widget{
+					PushButton{Text: "导出 CSV…", OnClicked: u.onExportCsv, MinSize: Size{150, 32}},
+					PushButton{Text: "导出彩色 Excel (.xls)…", OnClicked: u.onExportXls, MinSize: Size{190, 32}},
+				},
+			},
+			Label{Text: "CSV 为纯文本（无颜色）；彩色 Excel 中：合格绿色、超差红色，列顺序与 CSV 完全一致。", TextColor: colorSub},
 			Label{AssignTo: &u.exportResult, Text: "", TextColor: colorSub},
 			VSpacer{},
 		},
 	}
 }
 
-func (u *UI) onExportCsv() {
-	scope := "all"
+// exportScopeValue returns "all" or "CHn" from the current combo selection.
+func (u *UI) exportScopeValue() string {
 	if u.exportScope != nil && u.exportScope.CurrentIndex() > 0 {
-		scope = fmt.Sprintf("CH%d", u.exportScope.CurrentIndex())
+		return fmt.Sprintf("CH%d", u.exportScope.CurrentIndex())
 	}
+	return "all"
+}
+
+func (u *UI) onExportCsv() {
+	scope := u.exportScopeValue()
 	dlg := walk.FileDialog{
 		Title:    "导出 CSV",
 		Filter:   "CSV 文件 (*.csv)|*.csv",
@@ -245,7 +257,26 @@ func (u *UI) onExportCsv() {
 		return
 	}
 	u.exportResult.SetText(fmt.Sprintf("已导出 %d 条到：\n%s", n, dlg.FilePath))
-	u.setStatus(fmt.Sprintf("已导出 %d 条", n))
+	u.setStatus(fmt.Sprintf("已导出 %d 条 CSV", n))
+}
+
+func (u *UI) onExportXls() {
+	scope := u.exportScopeValue()
+	dlg := walk.FileDialog{
+		Title:    "导出彩色 Excel",
+		Filter:   "Excel 文件 (*.xls)|*.xls",
+		FilePath: protocolFileName("xls"),
+	}
+	if ok, err := dlg.ShowSave(u.main); err != nil || !ok {
+		return
+	}
+	n, err := u.app.ExportXls(dlg.FilePath, scope)
+	if err != nil {
+		errBox(u.main, "导出失败", err.Error())
+		return
+	}
+	u.exportResult.SetText(fmt.Sprintf("已导出 %d 条到：\n%s", n, dlg.FilePath))
+	u.setStatus(fmt.Sprintf("已导出 %d 条彩色 Excel", n))
 }
 
 // channelSettingWidgets builds the 7-row channel name/tolerance grid.

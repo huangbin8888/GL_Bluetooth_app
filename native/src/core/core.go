@@ -758,8 +758,9 @@ func (a *App) ImportCsv(path string) (int, int, error) {
 	return added, bad, nil
 }
 
-// ExportCsv writes records to path. scope: "all" or "CHn".
-func (a *App) ExportCsv(path, scope string) (int, error) {
+// exportRecordsAndMeta selects records by scope and builds CSV metadata shared
+// by ExportCsv and ExportXls.
+func (a *App) exportRecordsAndMeta(scope string) ([]protocol.Record, protocol.CSVMeta) {
 	recs := a.RecordsSnapshot()
 	if scope != "" && scope != "all" {
 		filtered := make([]protocol.Record, 0)
@@ -779,11 +780,31 @@ func (a *App) ExportCsv(path, scope string) (int, error) {
 		LowerUM:  s.lowerUM(), UpperUM: s.upperUM(),
 		ChannelNames: channelNamesOf(s), ResolveTol: s.ChannelBounds,
 	}
+	return recs, meta
+}
+
+// ExportCsv writes records to path. scope: "all" or "CHn".
+func (a *App) ExportCsv(path, scope string) (int, error) {
+	recs, meta := a.exportRecordsAndMeta(scope)
 	csv := protocol.RecordsToCsv(recs, meta)
 	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
 		return 0, err
 	}
 	if err := os.WriteFile(path, []byte(csv), 0644); err != nil {
+		return 0, err
+	}
+	return len(recs), nil
+}
+
+// ExportXls writes the same records as a coloured Excel 2003 XML Spreadsheet
+// (.xls): 合格 cells green, 超差 cells red. scope: "all" or "CHn".
+func (a *App) ExportXls(path, scope string) (int, error) {
+	recs, meta := a.exportRecordsAndMeta(scope)
+	xls := protocol.RecordsToXls(recs, meta)
+	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+		return 0, err
+	}
+	if err := os.WriteFile(path, []byte(xls), 0644); err != nil {
 		return 0, err
 	}
 	return len(recs), nil

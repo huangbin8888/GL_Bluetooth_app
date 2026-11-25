@@ -184,10 +184,10 @@ func TestFriendlyUnit(t *testing.T) {
 }
 
 func TestCSVHeadersCN7Columns(t *testing.T) {
-	if len(CSVHeadersCN) != 7 {
-		t.Fatalf("CSVHeadersCN length = %d, want 7", len(CSVHeadersCN))
+	if len(CSVHeadersCN) != 8 {
+		t.Fatalf("CSVHeadersCN length = %d, want 8", len(CSVHeadersCN))
 	}
-	want := []string{"日期", "时间", "设备名称", "测量值", "公差上限", "公差下限", "通道名称"}
+	want := []string{"日期", "时间", "设备名称", "测量值", "公差上限", "公差下限", "通道名称", "是否合格"}
 	for i, h := range want {
 		if CSVHeadersCN[i] != h {
 			t.Errorf("header[%d] = %q, want %q", i, CSVHeadersCN[i], h)
@@ -318,5 +318,51 @@ func TestCalcStatsWithResolver(t *testing.T) {
 	old := CalcStats(recs, 9000, 11000)
 	if old.OK != 1 {
 		t.Errorf("legacy CalcStats OK = %d, want 1", old.OK)
+	}
+}
+
+// TestCSVVerdictColumn guards the 8th "是否合格" column: each row carries the
+// plain-text verdict (合格/超差) matching the record, and it roundtrips back in
+// via the VERDICT alias without breaking the existing 7 columns.
+func TestCSVVerdictColumn(t *testing.T) {
+	recs := []Record{
+		{Date: "2026-11-25", T: "09:00:00", ValueUM: 10000, Ch: 1, Src: "BLE", Verdict: "合格"},
+		{Date: "2026-11-25", T: "09:00:01", ValueUM: 15000, Ch: 1, Src: "BLE", Verdict: "超差"},
+		// Verdict left empty -> must be derived from tolerance.
+		{Date: "2026-11-25", T: "09:00:02", ValueUM: 10000, Ch: 1, Src: "HID"},
+	}
+	csv := RecordsToCsv(recs, CSVMeta{LowerUM: 9000, UpperUM: 11000})
+	lines := strings.Split(strings.TrimPrefix(csv, "\ufeff"), "\r\n")
+	if len(lines) != 5 { // header + 3 rows + trailing CRLF
+		t.Fatalf("lines = %d, want 5:\n%s", len(lines), csv)
+	}
+	// Verify header has 8 fields, last being 是否合格.
+	head := strings.Split(lines[0], ",")
+	if len(head) != 8 || head[7] != "是否合格" {
+		t.Fatalf("header = %v, want 8 cols with last 是否合格", head)
+	}
+	wantVerdict := []string{"合格", "超差", "合格"}
+	for i, w := range wantVerdict {
+		cells := strings.Split(lines[i+1], ",")
+		if len(cells) != 8 {
+			t.Fatalf("row %d has %d cols, want 8: %v", i, len(cells), cells)
+		}
+		if cells[7] != w {
+			t.Errorf("row %d verdict = %q, want %q", i, cells[7], w)
+		}
+	}
+	// Roundtrip: verdict column must map back to VERDICT, no skipped cells.
+	parsed := CsvParse(csv)
+	if len(parsed.Skipped) != 0 {
+		t.Errorf("skipped = %v", parsed.Skipped)
+	}
+	back, bad := CsvToRecords(parsed, CSVDefaults{LowerUM: 9000, UpperUM: 11000})
+	if bad != 0 || len(back) != 3 {
+		t.Fatalf("roundtrip bad=%d n=%d", bad, len(back))
+	}
+	for i, w := range wantVerdict {
+		if back[i].Verdict != w {
+			t.Errorf("roundtrip row %d verdict = %q, want %q", i, back[i].Verdict, w)
+		}
 	}
 }

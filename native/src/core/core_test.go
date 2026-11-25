@@ -264,9 +264,9 @@ func TestApp7ColCSVWithChannelNames(t *testing.T) {
 }
 
 // protocolCSVHeadersCN keeps the test independent of a direct protocol import
-// churn while still asserting the exact Chinese 7-column header.
+// churn while still asserting the exact Chinese 8-column header.
 func protocolCSVHeadersCN() []string {
-	return []string{"日期", "时间", "设备名称", "测量值", "公差上限", "公差下限", "通道名称"}
+	return []string{"日期", "时间", "设备名称", "测量值", "公差上限", "公差下限", "通道名称", "是否合格"}
 }
 
 func TestSettingsNormalizeOldAndInvalidValues(t *testing.T) {
