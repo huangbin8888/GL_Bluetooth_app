@@ -78,7 +78,7 @@ func TestVerdictColumnFitsContentInSmallWindow(t *testing.T) {
 	}
 	// At the smallest font scale two glyphs still fit; the floor is content-sized,
 	// not an arbitrary wide value (<= 3 glyph widths including padding).
-	pt := scaleInt(tableFontSizePt, minTableScale)
+	pt := scaleInt(verdictFontSizePt, minTableScale)
 	need := verdictMinWidth(minTableScale)
 	if need < pt*2 { // two glyphs at the small font size
 		t.Errorf("verdict floor %d too small for two %dpt glyphs", need, pt)

@@ -57,16 +57,19 @@ const refTableWidth = 1150 // baseline sum of the 6 column widths (96-DPI px)
 // baseline column widths, in order: 时间/设备名称/通道/实测值/单位/判定
 var baseColWidths = [...]int{170, 200, 340, 190, 130, 120}
 
-// verdictCol 是判定列索引。判定列内容是固定的"合格/超差"两字，且沿用行高
-// 大字体（不随其他小字列一起缩小），因此需要单独保证一个内容宽度下限。
+// verdictCol 是判定列索引。判定列内容是固定的"合格/超差"两字。
 const verdictCol = 5
+
+// verdictFontSizePt 是判定列字号基准，与其他小字列同为 18pt（比行高的 30pt
+// 小一号）。用微软雅黑渲染中文，避免等宽字体对中文 fallback 度量不准。
+const verdictFontSizePt = 18
 
 // verdictMinWidth 返回判定列在当前字体缩放下恰好容纳两字所需的宽度。
 // 列宽按无下界 colScale 缩放、字体按下界 minTableScale 缩放；小窗口时列宽
 // 会缩得比字体更狠而把"合格/超差"截断。此下限让判定列跟随字体的有下界缩放，
 // 只取内容本身所需宽度（两字 + 左右各 8px 内边距），不过度加宽。
 func verdictMinWidth(fontScale float64) int {
-	pt := scaleInt(tableFontSizePt, fontScale)
+	pt := scaleInt(verdictFontSizePt, fontScale)
 	return pt*8/3 + 16 // 中文字宽≈pt*4/3，两字；+16 = 左右各 8px padding
 }
 

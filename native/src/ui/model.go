@@ -240,9 +240,10 @@ func (m *RecordModel) StyleCell(style *walk.CellStyle) {
 		return
 	}
 	r := recs[row]
-	// 列字体：时间/设备名称/通道/单位小一档（用户要求），实测值等宽粗体保持，行高由控件字体决定不受影响。
+	// 列字体：时间/设备名称/通道/单位/判定小一档（判定由大号改为小一号，解决"合格/超差"截断），
+	// 实测值等宽粗体保持，行高由控件字体决定不受影响。
 	switch col {
-	case 0, 1, 2, 4: // 时间、设备名称、通道、单位
+	case 0, 1, 2, 4, 5: // 时间、设备名称、通道、单位、判定
 		if fontCellSmall != nil {
 			style.Font = fontCellSmall
 		}
