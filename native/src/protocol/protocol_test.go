@@ -366,3 +366,66 @@ func TestCSVVerdictColumn(t *testing.T) {
 		}
 	}
 }
+
+// TestExportAfterToleranceChange guards P1-1: a record committed under old
+// tolerance keeps its frozen verdict AND its frozen bounds, so the exported
+// row is self-consistent even when export metadata carries new settings.
+func TestExportAfterToleranceChange(t *testing.T) {
+	// Simulate a record committed when bounds were 9.0–9.9mm: 10.000 -> 超差.
+	rec := Record{
+		Date: "2026-11-25", T: "17:00:00", ValueUM: 10000, Ch: 1, Src: "HID",
+		Verdict:        "超差",
+		TolLowerUM:     9000,
+		TolUpperUM:     9900,
+		HasTolSnapshot: true,
+	}
+	// Export with NEW tolerance 9.9–10.1mm (would make 10.000 合格).
+	meta := CSVMeta{LowerUM: 9900, UpperUM: 10100}
+	csv := RecordsToCsv([]Record{rec}, meta)
+	lines := strings.Split(strings.TrimPrefix(csv, "\ufeff"), "\r\n")
+	cells := strings.Split(lines[1], ",")
+	if cells[4] != "9.9000" || cells[5] != "9.0000" {
+		t.Errorf("exported bounds = upper %q lower %q, want frozen 9.9000/9.0000", cells[4], cells[5])
+	}
+	if cells[7] != "超差" {
+		t.Errorf("exported verdict = %q, want frozen 超差", cells[7])
+	}
+	// XLS must agree with CSV.
+	xls := RecordsToXls([]Record{rec}, meta)
+	if !strings.Contains(xls, "9.9000") || !strings.Contains(xls, "9.0000") || !strings.Contains(xls, "超差") {
+		t.Errorf("XLS did not carry frozen bounds/verdict:/n%s", xls)
+	}
+	// Roundtrip: importing then re-exporting keeps the frozen bounds.
+	parsed := CsvParse(csv)
+	back, bad := CsvToRecords(parsed, CSVDefaults{LowerUM: 9900, UpperUM: 10100})
+	if bad != 0 || len(back) != 1 {
+		t.Fatalf("roundtrip bad=%d n=%d", bad, len(back))
+	}
+	if !back[0].HasTolSnapshot || back[0].TolLowerUM != 9000 || back[0].TolUpperUM != 9900 {
+		t.Errorf("imported frozen bounds = %+v, want 9000/9900 snapshot", back[0])
+	}
+	csv2 := RecordsToCsv(back, meta)
+	if !strings.Contains(csv2, "9.0000") {
+		t.Errorf("re-export lost frozen lower bound:/n%s", csv2)
+	}
+}
+
+// TestShouldDropZeroDisablesDebounce guards P2-1: a debounce threshold of 0
+// means "keep every reading", not a silent 10µm fallback.
+func TestShouldDropZeroDisablesDebounce(t *testing.T) {
+	base := int64(1000)
+	prev := DropKey{1, 10000, base}
+	for _, cur := range []DropKey{
+		{1, 10000, base + 10}, // identical value
+		{1, 10005, base + 10}, // 5µm change
+		{1, 10050, base + 10}, // 50µm change
+	} {
+		if ShouldDrop(&prev, cur, 0, 300) {
+			t.Errorf("maxDeltaUM=0 must keep every reading, but dropped %+v", cur)
+		}
+	}
+	// Non-zero threshold must still debounce (unchanged default behaviour).
+	if !ShouldDrop(&prev, DropKey{1, 10005, base + 10}, 10, 300) {
+		t.Error("maxDeltaUM=10 should drop a 5µm change within 300ms")
+	}
+}

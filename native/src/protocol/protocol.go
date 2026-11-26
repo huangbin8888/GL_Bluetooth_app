@@ -105,6 +105,15 @@ type Record struct {
 	Legacy     bool
 	Inch       bool
 	TS         int64 // unix milliseconds
+	// TolLowerUM/TolUpperUM freeze the absolute tolerance bounds that were in
+	// force when this record was committed. Verdict is likewise frozen at
+	// commit time; keeping the bounds alongside it makes exported CSV/XLS rows
+	// self-consistent even if tolerance settings change later.
+	// HasTolSnapshot distinguishes a real (possibly zero) snapshot from records
+	// built without one (legacy/imported), which fall back to export metadata.
+	TolLowerUM     int64
+	TolUpperUM     int64
+	HasTolSnapshot bool
 }
 
 // DropKey is the minimal shape needed by ShouldDrop.
@@ -268,14 +277,16 @@ func FriendlyUnit(raw string) string {
 }
 
 // ShouldDrop: debounce only within the same channel, |Δum|<=maxDeltaUM and
-// |Δts|<=maxMs. maxDeltaUM<=0 -> 10, maxMs<=0 -> 300.
-// NOTE: clock rollback is handled by absolute value, so never mis-drops.
+// |Δts|<=maxMs. maxDeltaUM<=0 disables value debounce (every reading is kept),
+// which makes "0" an honest "off" instead of silently using 10µm.
+// maxMs<=0 uses 300. NOTE: clock rollback is handled by absolute value, so
+// never mis-drops.
 func ShouldDrop(prev *DropKey, cur DropKey, maxDeltaUM, maxMS int64) bool {
 	if prev == nil || prev.Ch != cur.Ch {
 		return false
 	}
 	if maxDeltaUM <= 0 {
-		maxDeltaUM = 10
+		return false
 	}
 	if maxMS <= 0 {
 		maxMS = 300
@@ -605,12 +616,26 @@ func CsvToRecords(parsed CSVParseResult, d CSVDefaults) (records []Record, badRo
 		if src == "" {
 			src = "IMPORT"
 		}
-		records = append(records, Record{
+		rec := Record{
 			Date: date, T: t, Seq: seq, Batch: batch,
 			ValueUM: um, V: mm, Raw: raw, RawValue: rawValue, RawUnit: rawUnit,
 			Verdict: verd, Src: src, DeviceMAC: o["DEVICE_MAC"], Note: o["NOTE"],
 			Ch: ch, Legacy: legacy, Inch: rawUnit == "i", TS: time.Now().UnixMilli(),
-		})
+		}
+		// Freeze absolute tolerance bounds from the CSV when they are genuine
+		// bounds for this row: both cells parse and they reproduce the stored
+		// verdict. This keeps export->import->export self-consistent (P1-1)
+		// while rejecting legacy deviation-style columns that would be wrong.
+		if lf, e1 := strconv.ParseFloat(strings.TrimSpace(o["LOWER_TOL"]), 64); e1 == nil {
+			if uf, e2 := strconv.ParseFloat(strings.TrimSpace(o["UPPER_TOL"]), 64); e2 == nil {
+				l := int64(math.Round(lf * float64(UMPerMM)))
+				u := int64(math.Round(uf * float64(UMPerMM)))
+				if u >= l && Verdict(um, l, u) == verd {
+					rec.TolLowerUM, rec.TolUpperUM, rec.HasTolSnapshot = l, u, true
+				}
+			}
+		}
+		records = append(records, rec)
 	}
 	return
 }
@@ -641,7 +666,12 @@ func channelLabel(ch int, names []string) string {
 // always carry exactly the same content and column order.
 func exportRowValues(r Record, meta CSVMeta) []string {
 	lo, hi := meta.LowerUM, meta.UpperUM
-	if meta.ResolveTol != nil {
+	if r.HasTolSnapshot {
+		// Prefer the bounds frozen at commit time so the exported lower/upper
+		// always match the frozen Verdict (P1-1: no self-contradictory rows).
+		lo, hi = r.TolLowerUM, r.TolUpperUM
+	} else if meta.ResolveTol != nil {
+		// Legacy/imported records without a snapshot keep the old behaviour.
 		lo, hi = meta.ResolveTol(r.Ch)
 	}
 	verdict := r.Verdict

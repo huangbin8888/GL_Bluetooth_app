@@ -4,7 +4,6 @@ package ui
 
 import (
 	"fmt"
-	"strconv"
 
 	"github.com/lxn/walk"
 	. "github.com/lxn/walk/declarative"
@@ -283,8 +282,8 @@ func (u *UI) onExportXls() {
 func (u *UI) channelSettingWidgets() []Widget {
 	widgets := []Widget{
 		Label{Text: "通道", Font: Font{Bold: true}},
-		Label{Text: "自定义名称", Font: Font{Bold: true}},
-		Label{Text: "蓝牙名称", Font: Font{Bold: true}},
+		Label{Text: "自定义名称（不可重名）", Font: Font{Bold: true}},
+		Label{Text: "蓝牙名称（仅表格显示）", Font: Font{Bold: true}},
 		Label{Text: "启用独立公差", Font: Font{Bold: true}},
 		Label{Text: "下限 (mm)", Font: Font{Bold: true}},
 		Label{Text: "上限 (mm)", Font: Font{Bold: true}},
@@ -336,10 +335,10 @@ func (u *UI) pageSettings() TabPage {
 						Layout: Grid{Margins: Margins{12, 10, 12, 10}, Spacing: 8, Columns: 2},
 						Children: []Widget{
 							Label{Text: "显示单位"}, ComboBox{AssignTo: &u.cmbUnit, Editable: false, Value: int(0), Model: []string{"mm", "inch"}},
-							Label{Text: "小数位"}, LineEdit{AssignTo: &u.edDigits},
-							Label{Text: "去抖阈值 (µm)"}, LineEdit{AssignTo: &u.edDebounce},
+							Label{Text: "小数位（inch 固定 4 位）"}, LineEdit{AssignTo: &u.edDigits},
+							Label{Text: "去抖阈值 (µm，0=关闭去抖)"}, LineEdit{AssignTo: &u.edDebounce},
 							Label{Text: "HID 终止符"}, ComboBox{AssignTo: &u.cmbTerm, Editable: false, Value: int(0), Model: []string{"ENTER（回车）", "TAB（制表）"}},
-							Label{Text: "批次号"}, LineEdit{AssignTo: &u.edBatch},
+							Label{Text: "批次号（留空保留原值）"}, LineEdit{AssignTo: &u.edBatch},
 						},
 					},
 					GroupBox{
@@ -349,7 +348,7 @@ func (u *UI) pageSettings() TabPage {
 							Label{Text: "超差蜂鸣与界面提醒（演示模式跳过）"}, CheckBox{AssignTo: &u.ckAlertOnBad, Text: ""},
 							Label{Text: "启动时自动重连上次设备（仅 BLE）"}, CheckBox{AssignTo: &u.ckAutoReconnect, Text: ""},
 							Label{Text: "空闲自动断开 BLE"}, CheckBox{AssignTo: &u.ckIdleDisconnect, Text: ""},
-							Label{Text: "空闲分钟数"}, LineEdit{AssignTo: &u.edIdleMinutes},
+							Label{Text: "空闲分钟数（≤0 回退默认 5）"}, LineEdit{AssignTo: &u.edIdleMinutes},
 						},
 					},
 					GroupBox{
@@ -360,10 +359,10 @@ func (u *UI) pageSettings() TabPage {
 						},
 					},
 					GroupBox{
-						Title:  "MES 上传（每条记录异步 POST JSON，默认关闭）",
+						Title:  "MES 上传（每条记录异步 POST JSON，默认关闭；仅对保存后的新记录生效）",
 						Layout: Grid{Margins: Margins{12, 10, 12, 10}, Spacing: 8, Columns: 2},
 						Children: []Widget{
-							Label{Text: "启用 MES 上传"}, CheckBox{AssignTo: &u.ckMESEnable, Text: ""},
+							Label{Text: "启用 MES 上传（URL 不能为空）"}, CheckBox{AssignTo: &u.ckMESEnable, Text: ""},
 							Label{Text: "接口 URL"}, LineEdit{AssignTo: &u.edMESURL},
 							Label{Text: "Bearer Token（可留空）"}, LineEdit{AssignTo: &u.edMESToken, PasswordMode: true},
 							Label{Text: "字段前缀（可留空）"}, LineEdit{AssignTo: &u.edMESPrefix},
@@ -411,20 +410,4 @@ func shortAddr(addr string) string {
 
 func protocolFileName(ext string) string {
 	return protocol.FileName("BATCH", protocol.NowStamp(), "ALL", ext)
-}
-
-func parseFloat(s string, def float64) float64 {
-	v, err := strconv.ParseFloat(s, 64)
-	if err != nil {
-		return def
-	}
-	return v
-}
-
-func parseInt(s string, def int) int {
-	v, err := strconv.Atoi(s)
-	if err != nil {
-		return def
-	}
-	return v
 }

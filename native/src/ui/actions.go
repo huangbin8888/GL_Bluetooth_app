@@ -236,20 +236,23 @@ func (u *UI) syncBridgeFromSettings(s core.Settings) {
 	u.bridge.SetNamePrefix(s.NamePrefix)
 }
 
-// onSaveSettings reads fields back into state.
+// onSaveSettings reads fields back into state. Non-blank invalid numbers and
+// logically invalid combos are reported to the user and the save is aborted,
+// so nothing is silently replaced while claiming success (P2-2/P2-3/P3-5).
 func (u *UI) onSaveSettings() {
+	var issues inputIssues
 	s := u.app.GetSettings()
-	s.NominalMM = parseFloat(u.edNominal.Text(), s.NominalMM)
-	s.LowerTolMM = parseFloat(u.edLower.Text(), s.LowerTolMM)
-	s.UpperTolMM = parseFloat(u.edUpper.Text(), s.UpperTolMM)
-	s.Digits = parseInt(u.edDigits.Text(), s.Digits)
+	s.NominalMM = parseFloatChecked(u.edNominal.Text(), s.NominalMM, &issues, "公称值")
+	s.LowerTolMM = parseFloatChecked(u.edLower.Text(), s.LowerTolMM, &issues, "下偏差")
+	s.UpperTolMM = parseFloatChecked(u.edUpper.Text(), s.UpperTolMM, &issues, "上偏差")
+	s.Digits = parseIntChecked(u.edDigits.Text(), s.Digits, &issues, "小数位")
 	if s.Digits < 0 {
 		s.Digits = 0
 	}
 	if s.Digits > 6 {
 		s.Digits = 6
 	}
-	s.DebounceUM = int64(parseInt(u.edDebounce.Text(), int(s.DebounceUM)))
+	s.DebounceUM = int64(parseIntChecked(u.edDebounce.Text(), int(s.DebounceUM), &issues, "去抖阈值"))
 	if u.cmbUnit != nil {
 		s.Unit = "mm"
 		if u.cmbUnit.CurrentIndex() == 1 {
@@ -265,9 +268,17 @@ func (u *UI) onSaveSettings() {
 	if u.edBatch != nil && u.edBatch.Text() != "" {
 		s.Batch = u.edBatch.Text()
 	}
+	seenNames := make(map[string]int)
 	for i := 0; i < protocol.MaxChannels; i++ {
 		if u.edChName[i] != nil {
-			s.Channels[i].Name = u.edChName[i].Text()
+			s.Channels[i].Name = strings.TrimSpace(u.edChName[i].Text())
+			if s.Channels[i].Name != "" {
+				if prev, dup := seenNames[s.Channels[i].Name]; dup {
+					issues.add("CH%d 与 CH%d 通道名称重复：%s（导出再导入会混淆，请用不同名称）", prev, i+1, s.Channels[i].Name)
+				} else {
+					seenNames[s.Channels[i].Name] = i + 1
+				}
+			}
 		}
 		if u.edChBleName[i] != nil {
 			s.Channels[i].BleName = u.edChBleName[i].Text()
@@ -276,10 +287,13 @@ func (u *UI) onSaveSettings() {
 			s.Channels[i].UseTol = u.ckChUseTol[i].Checked()
 		}
 		if u.edChLower[i] != nil {
-			s.Channels[i].LowerMM = parseFloat(u.edChLower[i].Text(), s.Channels[i].LowerMM)
+			s.Channels[i].LowerMM = parseFloatChecked(u.edChLower[i].Text(), s.Channels[i].LowerMM, &issues, fmt.Sprintf("CH%d 下限", i+1))
 		}
 		if u.edChUpper[i] != nil {
-			s.Channels[i].UpperMM = parseFloat(u.edChUpper[i].Text(), s.Channels[i].UpperMM)
+			s.Channels[i].UpperMM = parseFloatChecked(u.edChUpper[i].Text(), s.Channels[i].UpperMM, &issues, fmt.Sprintf("CH%d 上限", i+1))
+		}
+		if s.Channels[i].UseTol && s.Channels[i].UpperMM <= s.Channels[i].LowerMM {
+			issues.add("CH%d 已启用独立公差，但上限 (%.4f) 未大于下限 (%.4f)，会静默退回全局公差；请修正或关闭该通道独立公差", i+1, s.Channels[i].UpperMM, s.Channels[i].LowerMM)
 		}
 	}
 	if u.ckAlertOnBad != nil {
@@ -292,12 +306,19 @@ func (u *UI) onSaveSettings() {
 		s.IdleDisconnect = u.ckIdleDisconnect.Checked()
 	}
 	if u.edIdleMinutes != nil {
-		s.IdleMinutes = parseInt(u.edIdleMinutes.Text(), s.IdleMinutes)
+		s.IdleMinutes = parseIntChecked(u.edIdleMinutes.Text(), s.IdleMinutes, &issues, "空闲分钟数")
 	}
 	if u.edNamePrefix != nil && u.edNamePrefix.Text() != "" {
 		s.NamePrefix = u.edNamePrefix.Text()
 	}
-	u.readMESFromControls(&s)
+	u.readMESFromControls(&s, &issues)
+	if s.MES.Enable && strings.TrimSpace(s.MES.URL) == "" {
+		issues.add("已启用 MES 上传但未填写接口 URL，实际不会启用；请填写 URL 或关闭 MES")
+	}
+	if issues.any() {
+		errBox(u.main, "设置未保存", "请修正以下问题后再保存：\n\n"+issues.text())
+		return
+	}
 	s.Normalize()
 	u.app.SetSettings(s)
 	u.refreshChannelComboBoxes() // 立即让所有下拉跟随新通道名
@@ -307,6 +328,8 @@ func (u *UI) onSaveSettings() {
 	u.model.PublishRowsReset()
 	u.repaintTable() // refresh owner-data cells (digits/unit/filter may have changed)
 	u.saveSettingsFile(s)
+	u.refreshSettingsInputs() // 回显钳制/兜底后的真实生效值（P2-1/P3-1/P3-2/P3-3）
+	u.refreshMESStatusLabel() // MES 开关变更后立即刷新状态标签（P3-2）
 	u.refreshReading()
 	u.refreshCountStats()
 	info(u.main, "设置", "设置已保存并生效。")

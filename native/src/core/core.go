@@ -156,6 +156,12 @@ func (s *Settings) Normalize() {
 	if s.MES.Retry < 0 {
 		s.MES.Retry = 0
 	}
+	// Keep the stored Retry equal to the effective value used by the upload
+	// worker (mes.Config.Normalize clamps to 5). Without this, a config saved
+	// with 12 echoes 12 after restart but uploads with 5 (P3-1).
+	if s.MES.Retry > 5 {
+		s.MES.Retry = 5
+	}
 	if s.MES.QueueSize <= 0 {
 		s.MES.QueueSize = mesDefaults.QueueSize
 	}
@@ -635,6 +641,9 @@ func (a *App) commit(fr *protocol.Frame, ch int, src string) {
 		Raw: fr.Raw, RawValue: fmt.Sprintf("%.4f", fr.RawValue), RawUnit: fr.Unit,
 		Verdict: protocol.Verdict(fr.ValueUM, lo, hi),
 		Src:     src, DeviceMAC: devLabel, DeviceName: devName, Ch: ch, Inch: fr.Unit == "i", TS: now,
+		// Freeze the bounds used for the verdict so CSV/XLS export stays
+		// self-consistent after tolerance settings change (P1-1).
+		TolLowerUM: lo, TolUpperUM: hi, HasTolSnapshot: true,
 	}
 	a.Records = append(a.Records, rec)
 	total := len(a.Records)

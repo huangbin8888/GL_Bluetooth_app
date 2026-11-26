@@ -395,3 +395,59 @@ func TestDeviceNameFallsBackToMAC(t *testing.T) {
 		t.Fatalf("BLE fallback DeviceName = %q", recs[0].DeviceName)
 	}
 }
+
+// TestExportAfterToleranceChangeEndToEnd guards P1-1 through the real App
+// pipeline: feed a record under one tolerance, change tolerance, then export.
+// The exported bounds must be the frozen ones that produced the verdict.
+func TestExportAfterToleranceChangeEndToEnd(t *testing.T) {
+	a := NewApp()
+	s := a.GetSettings()
+	s.NominalMM, s.LowerTolMM, s.UpperTolMM = 10, -0.1, -0.01 // bounds 9.9~9.99
+	a.SetSettings(s)
+	a.FeedHIDToken("10.00") // outside 9.9~9.99 -> 超差
+	recs := a.RecordsSnapshot()
+	if len(recs) != 1 || recs[0].Verdict != "超差" {
+		t.Fatalf("record = %+v, want one 超差 record", recs)
+	}
+	if !recs[0].HasTolSnapshot || recs[0].TolUpperUM != 9990 || recs[0].TolLowerUM != 9900 {
+		t.Fatalf("frozen bounds = %+v, want 9900/9990", recs[0])
+	}
+
+	// Change tolerance so the SAME value would now be 合格.
+	s2 := a.GetSettings()
+	s2.NominalMM, s2.LowerTolMM, s2.UpperTolMM = 10, -0.1, 0.1 // bounds 9.9~10.1
+	a.SetSettings(s2)
+
+	path := t.TempDir() + "/out.csv"
+	if _, err := a.ExportCsv(path, "all"); err != nil {
+		t.Fatal(err)
+	}
+	csv, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(csv)
+	// Exported upper bound must be the frozen 9.9900, not the new 10.1000.
+	if !strings.Contains(text, "9.9900") || strings.Contains(text, "10.1000") {
+		t.Errorf("export used current bounds instead of frozen bounds:/n%s", text)
+	}
+	if !strings.Contains(text, "超差") {
+		t.Errorf("export lost frozen verdict:/n%s", text)
+	}
+}
+
+// TestNormalizeClampsMESRetry guards P3-1: a persisted Retry>5 must display
+// the same value the upload worker actually uses (clamped to 5).
+func TestNormalizeClampsMESRetry(t *testing.T) {
+	s := DefaultSettings()
+	s.MES.Retry = 12
+	s.Normalize()
+	if s.MES.Retry != 5 {
+		t.Errorf("Retry after Normalize = %d, want 5", s.MES.Retry)
+	}
+	s.MES.Retry = -3
+	s.Normalize()
+	if s.MES.Retry != 0 {
+		t.Errorf("negative Retry after Normalize = %d, want 0", s.MES.Retry)
+	}
+}

@@ -61,8 +61,9 @@ func (u *UI) refreshMESInputs(s core.Settings) {
 	u.refreshMESStatusLabel()
 }
 
-// readMESFromControls writes MES controls back into settings.
-func (u *UI) readMESFromControls(s *core.Settings) {
+// readMESFromControls writes MES controls back into settings. Invalid numeric
+// text is recorded in issues instead of being silently replaced.
+func (u *UI) readMESFromControls(s *core.Settings, issues *inputIssues) {
 	if u.ckMESEnable != nil {
 		s.MES.Enable = u.ckMESEnable.Checked()
 	}
@@ -76,10 +77,18 @@ func (u *UI) readMESFromControls(s *core.Settings) {
 		s.MES.FieldPrefix = strings.TrimSpace(u.edMESPrefix.Text())
 	}
 	if u.edMESTimeout != nil {
-		s.MES.TimeoutMS = parseInt(u.edMESTimeout.Text(), s.MES.TimeoutMS)
+		s.MES.TimeoutMS = parseIntChecked(u.edMESTimeout.Text(), s.MES.TimeoutMS, issues, "MES 超时")
 	}
 	if u.edMESRetry != nil {
-		s.MES.Retry = parseInt(u.edMESRetry.Text(), s.MES.Retry)
+		s.MES.Retry = parseIntChecked(u.edMESRetry.Text(), s.MES.Retry, issues, "MES 重试次数")
+		// Reflect the effective (clamped) value in Settings so the form echo
+		// after saving matches what the upload worker actually uses (P3-1).
+		if s.MES.Retry < 0 {
+			s.MES.Retry = 0
+		}
+		if s.MES.Retry > 5 {
+			s.MES.Retry = 5
+		}
 	}
 	if u.cmbMESScope != nil {
 		s.MES.Scope = mesScopeString(u.cmbMESScope.CurrentIndex())
