@@ -132,6 +132,23 @@ func TestHidSplitAndToFrame(t *testing.T) {
 	if f := HidToFrame("12.30"); f != "DAT0:m+12.30" {
 		t.Errorf("mm default = %q", f)
 	}
+	// Relaxed parsing (no-data-in-table fix): comma decimals, junk prefixes,
+	// bracketed values and quoted inches must all yield a frame.
+	for _, tc := range []struct{ in, want string }{
+		{"12,34", "DAT0:m+12.34"},
+		{"-12,34 mm", "DAT0:m-12.34"},
+		{"  W 12.34  ", "DAT0:m+12.34"},
+		{"[12.34]", "DAT0:m+12.34"},
+		{"12.34MM", "DAT0:m+12.34"},
+		{`12.34"`, "DAT0:i+12.34"},
+		{"MEAS:12.34", "DAT0:m+12.34"},
+		{"garbage", ""},
+		{"", ""},
+	} {
+		if f := HidToFrame(tc.in); f != tc.want {
+			t.Errorf("HidToFrame(%q) = %q, want %q", tc.in, f, tc.want)
+		}
+	}
 }
 
 func TestValidateNam(t *testing.T) {

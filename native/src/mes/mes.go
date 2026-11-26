@@ -197,12 +197,15 @@ func (c Config) buildBody(item UploadItem) ([]byte, error) {
 		Channel:     fmt.Sprintf("CH%d", item.Record.Ch),
 		ChannelName: item.ChannelName,
 		Value:       protocol.ToMM(item.Record.ValueUM),
-		Unit:        protocol.FriendlyUnit(item.Record.RawUnit),
-		Verdict:     item.Record.Verdict,
-		Batch:       item.Record.Batch,
-		Timestamp:   item.Record.Date + " " + item.Record.T,
-		Seq:         item.Record.Seq,
-		Source:      item.Record.Src,
+		// Value is always millimetres; the wire unit from the caliper may be
+		// inches. Reporting that raw unit here used to tell MES that a value
+		// such as 25.4 was inches. Keep value and unit in the same system.
+		Unit:      "mm",
+		Verdict:   item.Record.Verdict,
+		Batch:     item.Record.Batch,
+		Timestamp: item.Record.Date + " " + item.Record.T,
+		Seq:       item.Record.Seq,
+		Source:    item.Record.Src,
 	}
 	prefix := c.FieldPrefix
 	if prefix == "" {

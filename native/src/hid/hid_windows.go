@@ -84,7 +84,36 @@ func New(terminator string, onToken func(string), onKey func(string)) *Capture {
 	return &Capture{onToken: onToken, onKey: onKey, terminator: terminator}
 }
 
-var hookRef *Capture // package-level so the callback trampoline can reach it
+var (
+	hookRefMu sync.RWMutex
+	hookRef   *Capture // package-level so the callback trampoline can reach it
+)
+
+// setHookRef publishes the capture receiving global key events.
+func setHookRef(c *Capture) {
+	hookRefMu.Lock()
+	hookRef = c
+	hookRefMu.Unlock()
+}
+
+// getHookRef snapshots the active capture in one atomic read. Reading the
+// global twice let Stop() nil it in between and crash hookProc with a nil
+// pointer dereference.
+func getHookRef() *Capture {
+	hookRefMu.RLock()
+	c := hookRef
+	hookRefMu.RUnlock()
+	return c
+}
+
+// clearHookRef detaches the callback only if c is still the active capture.
+func clearHookRef(c *Capture) {
+	hookRefMu.Lock()
+	if hookRef == c {
+		hookRef = nil
+	}
+	hookRefMu.Unlock()
+}
 
 // Start installs the hook and runs its own message pump on a dedicated OS
 // thread. Each call after a Stop creates a brand-new run, so the Capture is
@@ -103,7 +132,7 @@ func (c *Capture) Start() error {
 	c.enabled = true
 	c.mu.Unlock()
 
-	hookRef = c
+	setHookRef(c)
 	go c.hookLoop(run)
 	return nil
 }
@@ -186,9 +215,7 @@ func (c *Capture) Stop() {
 	c.mu.Unlock()
 
 	if run == nil {
-		if hookRef == c {
-			hookRef = nil
-		}
+		clearHookRef(c)
 		return
 	}
 
@@ -209,9 +236,7 @@ func (c *Capture) Stop() {
 	case <-run.done:
 	case <-time.After(1500 * time.Millisecond):
 	}
-	if hookRef == c {
-		hookRef = nil
-	}
+	clearHookRef(c)
 }
 
 func (c *Capture) IsEnabled() bool {
@@ -237,10 +262,11 @@ func (c *Capture) ClearBuffer() {
 }
 
 func hookProc(nCode, wParam, lParam uintptr) uintptr {
-	if int32(nCode) >= 0 && hookRef != nil {
+	c := getHookRef()
+	if int32(nCode) >= 0 && c != nil {
 		if wParam == wmKeyDown || wParam == wmSysKeyDown {
 			kb := (*kbdLLHookStruct)(unsafe.Pointer(lParam))
-			hookRef.handleKey(kb.vkCode, kb.flags)
+			c.handleKey(kb.vkCode, kb.flags)
 		}
 	}
 	r, _, _ := procCallNextHookEx.Call(0, nCode, wParam, lParam)
@@ -255,8 +281,11 @@ func (c *Capture) handleKey(vk uint32, flags uint32) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	isTerm := (c.terminator == "TAB" && vk == vkTab) ||
-		(c.terminator == "ENTER" && vk == vkReturn)
+	// Both ENTER and TAB commit a reading. Calipers ship with either key; a
+	// mismatch between the saved terminator and the key actually emitted used
+	// to hold every reading in the buffer forever. No per-device interleaving
+	// risk here: the legacy hook is a single un-fingerprinted stream.
+	isTerm := isTerminatorKey(vk)
 	if isTerm {
 		tok := strings.TrimSpace(c.buf.String())
 		c.buf.Reset()

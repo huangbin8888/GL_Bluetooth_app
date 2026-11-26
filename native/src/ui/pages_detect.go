@@ -200,10 +200,15 @@ func (u *UI) onHidToggle() {
 		}
 		u.btnHidToggle.SetText("关闭 HID 全局捕获")
 		u.lblHidLive.SetText("等待读数…")
+		term := u.app.GetSettings().Terminator
+		termTip := "ENTER（回车）"
+		if term == "TAB" {
+			termTip = "TAB（制表）"
+		}
 		if u.bridge.HIDIsRaw() {
-			u.setStatus("HID 已开启（Raw Input：按设备指纹自动归档）")
+			u.setStatus("HID 已开启（Raw Input·指纹归档）｜终止符偏好：" + termTip + "｜回车/制表均可提交读数")
 		} else {
-			u.setStatus("HID 已开启（普通键盘钩子回退：无法自动分通道，需手动选通道）")
+			u.setStatus("HID 已开启（键盘钩子·无法分通道）｜终止符偏好：" + termTip + "｜回车/制表均可提交读数")
 		}
 	}
 }

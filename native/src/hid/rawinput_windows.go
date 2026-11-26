@@ -10,7 +10,10 @@ package hid
 
 import (
 	"errors"
+	"fmt"
+	"os"
 	"runtime"
+	"runtime/debug"
 	"strings"
 	"sync"
 	"time"
@@ -31,6 +34,10 @@ const (
 	ridevRemove         = 0x00000001
 	hidUsagePageDesktop = 0x01
 	hidUsageKeyboard    = 0x06
+
+	// maxDeviceNameChars bounds the RIDI_DEVICENAME character count before
+	// allocating, so a bogus API result cannot force a huge allocation.
+	maxDeviceNameChars = 4096
 )
 
 var (
@@ -111,6 +118,7 @@ type RawCapture struct {
 	enabled    bool
 	bufs       map[string]*strings.Builder // token assembly per device fingerprint
 	onToken    func(token, fingerprint string)
+	onKey      func(string) // optional live key preview, mirrors legacy Capture
 	terminator string
 	run        *rawRun
 }
@@ -122,11 +130,38 @@ type HIDDeviceInfo struct {
 }
 
 var (
-	rawHookRef        *RawCapture // reached by the global window callback
+	rawRefMu          sync.RWMutex // guards rawHookRef across UI / pump threads
+	rawHookRef        *RawCapture  // reached by the global window callback
 	rawClassOnce      sync.Once
 	rawClassName      = windows.StringToUTF16Ptr("GLCaliperRawInputMsg")
 	rawWindowCallback = windows.NewCallback(rawWindowProc)
 )
+
+// setRawHookRef publishes the capture the hidden-window callback should feed.
+func setRawHookRef(c *RawCapture) {
+	rawRefMu.Lock()
+	rawHookRef = c
+	rawRefMu.Unlock()
+}
+
+// getRawHookRef snapshots the active capture. The callback must never keep a
+// lock while dispatching keys, so callers get a plain pointer copy.
+func getRawHookRef() *RawCapture {
+	rawRefMu.RLock()
+	c := rawHookRef
+	rawRefMu.RUnlock()
+	return c
+}
+
+// clearRawHookRef detaches the callback only if c is still the active capture,
+// so a stale session cannot detach a newer one.
+func clearRawHookRef(c *RawCapture) {
+	rawRefMu.Lock()
+	if rawHookRef == c {
+		rawHookRef = nil
+	}
+	rawRefMu.Unlock()
+}
 
 // NewRaw creates a Raw Input capture. onToken receives (reading, fingerprint)
 // for each terminator-delimited token.
@@ -135,6 +170,14 @@ func NewRaw(terminator string, onToken func(string, string)) *RawCapture {
 		terminator = "ENTER"
 	}
 	return &RawCapture{onToken: onToken, terminator: terminator, bufs: make(map[string]*strings.Builder)}
+}
+
+// SetOnKey installs an optional live per-character preview callback, mirroring
+// the legacy keyboard hook. Safe to call before Start.
+func (c *RawCapture) SetOnKey(fn func(string)) {
+	c.mu.Lock()
+	c.onKey = fn
+	c.mu.Unlock()
 }
 
 // Start registers for keyboard Raw Input on a hidden window and pumps its
@@ -150,7 +193,7 @@ func (c *RawCapture) Start() error {
 	c.enabled = true
 	c.mu.Unlock()
 
-	rawHookRef = c
+	setRawHookRef(c)
 	go c.rawLoop(run)
 	<-run.ready
 	c.mu.Lock()
@@ -248,9 +291,7 @@ func (c *RawCapture) finishRun(run *rawRun) {
 		c.run = nil
 		c.enabled = false
 	}
-	if rawHookRef == c {
-		rawHookRef = nil
-	}
+	clearRawHookRef(c)
 	// A stop→start cycle reuses this instance. Drop any half-typed token so
 	// the next session never prefixes its first reading with stale digits.
 	for k := range c.bufs {
@@ -309,8 +350,18 @@ func (c *RawCapture) ClearBuffer() {
 }
 
 // rawWindowProc is the global callback for the hidden Raw Input window.
-func rawWindowProc(hwnd uintptr, msg uint32, wParam, lParam uintptr) uintptr {
+// A panic here used to unwind through the Win32 callback trampoline and kill
+// the whole process; contain it so one malformed message only drops itself.
+func rawWindowProc(hwnd uintptr, msg uint32, wParam, lParam uintptr) (result uintptr) {
 	if msg == wmInputMsg {
+		defer func() {
+			if r := recover(); r != nil {
+				// Never fail silently: a swallowed panic is indistinguishable
+				// from "no data". Record it so field reports are actionable.
+				writeHIDDiag(fmt.Sprintf("WM_INPUT panic: %v\n%s", r, debug.Stack()))
+				result = 0
+			}
+		}()
 		handleWmInput(lParam)
 		return 0
 	}
@@ -318,8 +369,19 @@ func rawWindowProc(hwnd uintptr, msg uint32, wParam, lParam uintptr) uintptr {
 	return r
 }
 
+// writeHIDDiag appends one diagnostic line to glcaliper-hid-diag.log next to
+// the executable. Failures are ignored: diagnostics must never affect capture.
+func writeHIDDiag(line string) {
+	f, err := os.OpenFile("glcaliper-hid-diag.log", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+	if err != nil {
+		return
+	}
+	defer f.Close()
+	_, _ = fmt.Fprintf(f, "%s %s\n", time.Now().Format("2006-01-02 15:04:05"), line)
+}
+
 func handleWmInput(hRawInput uintptr) {
-	c := rawHookRef
+	c := getRawHookRef()
 	if c == nil {
 		return
 	}
@@ -364,21 +426,20 @@ func (c *RawCapture) bufFor(fingerprint string) *strings.Builder {
 	return b
 }
 
-// terminatorKey maps the configured terminator to its virtual-key code.
-func (c *RawCapture) terminatorKey() uint32 {
-	if c.terminator == "TAB" {
-		return vkTab
-	}
-	return vkReturn // "ENTER" (the only other accepted setting)
+// isTerminatorKey reports whether vk ends a reading. Both ENTER and TAB are
+// accepted: calipers ship with either key, and a mismatch between the saved
+// setting and the key a caliper actually emits used to hold every token in the
+// buffer forever ("no data in the table"). Since each device keeps its own
+// fingerprint-keyed buffer, accepting both keys cannot cut one device's
+// reading short with another device's key.
+func isTerminatorKey(vk uint32) bool {
+	return vk == vkTab || vk == vkReturn
 }
 
 func (c *RawCapture) handleRawKey(vk uint32, fingerprint string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	// Only the configured terminator commits a reading. Accepting both keys
-	// made the setting inert and could cut one device's reading short when a
-	// second device emitted the other key.
-	if vk == c.terminatorKey() {
+	if isTerminatorKey(vk) {
 		buf := c.bufFor(fingerprint)
 		tok := strings.TrimSpace(buf.String())
 		buf.Reset()
@@ -393,18 +454,48 @@ func (c *RawCapture) handleRawKey(vk uint32, fingerprint string) {
 		return
 	}
 	c.bufFor(fingerprint).WriteString(ch)
+	if c.onKey != nil {
+		fn := c.onKey
+		go fn(ch)
+	}
+}
+
+// deviceNameWCharLen converts the two size values reported by a
+// RIDI_DEVICENAME query into a safe []uint16 slice length.
+//
+// MSDN is subtle here: for RIDI_DEVICENAME, pcbSize is a CHARACTER count,
+// while the function's return value is a BYTE count (and -1 when the buffer
+// is too small). The old code allocated (chars+1)/2 WCHARs and sliced with the
+// byte-count return value, so the first reading of every physical caliper
+// panicked with "slice bounds out of range" in the WM_INPUT callback. Derive
+// the length from pcbSize only, clamp it to the allocated buffer, and reject
+// the 0 / -1 failure sentinels.
+func deviceNameWCharLen(chars uint32, ret uintptr, bufCap int) int {
+	if ret == 0 || ret == ^uintptr(0) || ret == uintptr(^uint32(0)) {
+		return 0
+	}
+	if chars == 0 || chars > maxDeviceNameChars {
+		return 0
+	}
+	n := int(chars)
+	if n <= 0 || n > bufCap {
+		return 0
+	}
+	return n
 }
 
 // deviceFingerprintFromHandle returns the normalised device path for hDevice.
 func deviceFingerprintFromHandle(h windows.Handle) string {
-	var size uint32
-	procGetRawInputDeviceInfoW.Call(uintptr(h), riDeviceName, 0, uintptr(unsafe.Pointer(&size)))
-	if size == 0 || size > 4096 {
+	var chars uint32
+	procGetRawInputDeviceInfoW.Call(uintptr(h), riDeviceName, 0, uintptr(unsafe.Pointer(&chars)))
+	if chars == 0 || chars > maxDeviceNameChars {
 		return ""
 	}
-	buf := make([]uint16, (size+1)/2)
-	n, _, _ := procGetRawInputDeviceInfoW.Call(uintptr(h), riDeviceName,
-		uintptr(unsafe.Pointer(&buf[0])), uintptr(unsafe.Pointer(&size)))
+	// RIDI_DEVICENAME reports a character count in pcbSize, not a byte count.
+	buf := make([]uint16, chars)
+	ret, _, _ := procGetRawInputDeviceInfoW.Call(uintptr(h), riDeviceName,
+		uintptr(unsafe.Pointer(&buf[0])), uintptr(unsafe.Pointer(&chars)))
+	n := deviceNameWCharLen(chars, ret, len(buf))
 	if n == 0 {
 		return ""
 	}

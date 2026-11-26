@@ -74,3 +74,12 @@ func TestStartRejectsWhenAlreadyRunning(t *testing.T) {
 		t.Fatal("expected the already-running guard to hold")
 	}
 }
+
+// TestHookProcWithNoActiveCaptureDoesNotPanic covers the legacy fallback's
+// callback: it reads the package-level capture pointer once, so a Stop() that
+// clears the pointer cannot turn the second read into a nil dereference.
+func TestHookProcWithNoActiveCaptureDoesNotPanic(t *testing.T) {
+	setHookRef(nil)
+	defer setHookRef(nil)
+	hookProc(0, wmKeyDown, 0)
+}

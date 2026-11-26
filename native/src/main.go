@@ -33,9 +33,15 @@ func (b *bridge) HIDStart() error {
 	term := b.app.GetSettings().Terminator
 	if b.raw == nil {
 		b.raw = hid.NewRaw(term, func(token, fp string) {
-			b.app.FeedHIDTokenWithDevice(token, fp)
-			b.ui.OnHidChar("[✓]")
+			if b.app.FeedHIDTokenWithDevice(token, fp) {
+				b.ui.OnHidChar(" [✓已入表格]")
+			} else {
+				b.ui.OnHidChar(" [×未识别]")
+			}
 		})
+		// Raw Input had no live per-key preview (only the legacy hook did), so
+		// typing looked like "nothing happens". Mirror the legacy behaviour.
+		b.raw.SetOnKey(func(ch string) { b.ui.OnHidChar(ch) })
 	}
 	if err := b.raw.Start(); err == nil {
 		return nil
@@ -45,8 +51,11 @@ func (b *bridge) HIDStart() error {
 	if b.hid == nil {
 		b.hid = hid.New(term,
 			func(token string) {
-				b.app.FeedHIDToken(token)
-				b.ui.OnHidChar("[✓]")
+				if b.app.FeedHIDToken(token) {
+					b.ui.OnHidChar(" [✓已入表格]")
+				} else {
+					b.ui.OnHidChar(" [×未识别]")
+				}
 			},
 			func(ch string) { b.ui.OnHidChar(ch) })
 	}
@@ -63,6 +72,7 @@ func (b *bridge) HIDStop() {
 func (b *bridge) HIDEnabled() bool {
 	return (b.raw != nil && b.raw.IsEnabled()) || (b.hid != nil && b.hid.IsEnabled())
 }
+
 // HIDIsRaw reports whether the active capture carries device fingerprints.
 // False means the fallback global hook is in use (no automatic channel filing).
 func (b *bridge) HIDIsRaw() bool {

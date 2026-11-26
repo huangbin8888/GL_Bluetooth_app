@@ -309,12 +309,23 @@ func (u *UI) setStatus(text string) {
 	u.app.SetStatus(text)
 }
 
+// unitSuffix is the SINGLE source of truth for the unit text shown beside a
+// converted reading and in the table's 单位 column. Both must follow the
+// display setting; the caliper's raw protocol unit must never leak into a
+// converted value's suffix (that produced "10.00 mm" next to "inch").
+func unitSuffix(unit string) string {
+	if unit == "inch" {
+		return "in"
+	}
+	return "mm"
+}
+
 func (u *UI) fmtMM(um int64) string {
 	s := u.app.GetSettings()
 	if s.Unit == "inch" {
-		return fmt.Sprintf("%.4f in", protocolToInch(um))
+		return fmt.Sprintf("%.4f %s", protocolToInch(um), unitSuffix(s.Unit))
 	}
-	return fmt.Sprintf("%.*f mm", s.Digits, protocolToMM(um))
+	return fmt.Sprintf("%.*f %s", s.Digits, protocolToMM(um), unitSuffix(s.Unit))
 }
 
 func protocolToMM(um int64) float64   { return float64(um) / 1000.0 }

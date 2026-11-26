@@ -45,6 +45,52 @@ func TestTableChannelColumnFollowsCustomName(t *testing.T) {
 	}
 }
 
+// TestTableUnitColumnFollowsDisplaySetting reproduces the reported defect:
+// an inch-speaking caliper (RawUnit "i") with 显示单位=mm must show a mm value
+// AND a mm unit. The old code converted col 3 but labelled it with the wire
+// unit, producing e.g. 25.40 next to "inch".
+func TestTableUnitColumnFollowsDisplaySetting(t *testing.T) {
+	app := core.NewApp()
+	if !app.FeedHIDToken("1.0000 in") { // 1 in = 25400 um; raw unit stays "i"
+		t.Fatal("inch token was not ingested")
+	}
+	recs := app.RecordsSnapshot()
+	if len(recs) != 1 || recs[0].RawUnit != "i" {
+		t.Fatalf("raw unit = %v, want one record with RawUnit i", recs)
+	}
+
+	m := NewRecordModel(app)
+	m.SetDisplay(2, "mm", "", false)
+	if got := m.Value(0, 3); got != "25.40" {
+		t.Errorf("mm value cell = %v, want 25.40", got)
+	}
+	if got := m.Value(0, 4); got != "mm" {
+		t.Errorf("mm unit cell = %v, want mm", got)
+	}
+
+	// Switching the display setting changes BOTH cells, including already
+	// displayed rows, without touching the stored raw unit.
+	m.SetDisplay(2, "inch", "", false)
+	if got := m.Value(0, 3); got != "1.0000" {
+		t.Errorf("inch value cell = %v, want 1.0000", got)
+	}
+	if got := m.Value(0, 4); got != "in" {
+		t.Errorf("inch unit cell = %v, want in", got)
+	}
+	if got := app.RecordsSnapshot()[0].RawUnit; got != "i" {
+		t.Errorf("stored RawUnit = %q, must stay i", got)
+	}
+}
+
+func TestUnitSuffix(t *testing.T) {
+	cases := map[string]string{"mm": "mm", "inch": "in", "": "mm"}
+	for in, want := range cases {
+		if got := unitSuffix(in); got != want {
+			t.Errorf("unitSuffix(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
 // TestTableDeviceNameColumnFollowsBleName guards the requested behaviour:
 // editing a channel's Bluetooth name in Settings must be reflected live in the
 // table's 设备名称 column, per channel, for already-visible rows too; clearing

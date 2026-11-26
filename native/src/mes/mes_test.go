@@ -76,6 +76,29 @@ func TestSendPostPayload(t *testing.T) {
 	}
 }
 
+// TestPayloadUnitMatchesValue guards the unit contract: Value is always
+// converted to millimetres, so unit must be "mm" even for an inch caliper.
+func TestPayloadUnitMatchesValue(t *testing.T) {
+	item := sampleItem(8, "合格")
+	item.Record.ValueUM = 25400 // 1 inch from the caliper
+	item.Record.RawUnit = "i"
+	cfg := Config{}.Normalize()
+	body, err := cfg.buildBody(item)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var p map[string]interface{}
+	if err := json.Unmarshal(body, &p); err != nil {
+		t.Fatal(err)
+	}
+	if p["value"] != 25.4 {
+		t.Errorf("value = %v, want 25.4 (mm)", p["value"])
+	}
+	if p["unit"] != "mm" {
+		t.Errorf("unit = %v, want mm (must match the converted value)", p["unit"])
+	}
+}
+
 // TestFieldPrefix verifies every key is prefixed.
 func TestFieldPrefix(t *testing.T) {
 	cfg := Config{FieldPrefix: "mes_"}.Normalize()

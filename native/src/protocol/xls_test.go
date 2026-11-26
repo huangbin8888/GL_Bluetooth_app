@@ -69,12 +69,63 @@ func TestXlsVerdictColours(t *testing.T) {
 		if !strings.Contains(last, "ss:StyleID=\""+w.style+"\"") {
 			t.Errorf("row %d (=%s) missing style %s", ri, w.verdict, w.style)
 		}
-		// No other cell in the row should carry a verdict style.
+		// No other cell should carry a style, except the 测量值 cell (col 4),
+		// which intentionally uses a larger font so the number stands out.
 		for ci := 1; ci <= 7; ci++ {
+			if ci == 4 {
+				continue
+			}
 			if strings.Contains(dataCells[ci], "ss:StyleID") {
 				t.Errorf("row %d cell %d unexpectedly styled", ri, ci)
 			}
 		}
+	}
+}
+
+// TestXlsValueFontOneSizeBigger guards the "测量值 slightly larger" request:
+// only the 4th column gets the larger-font style; verdict colours, other
+// columns and the plain CSV export stay byte-for-byte unchanged in behaviour.
+func TestXlsValueFontOneSizeBigger(t *testing.T) {
+	recs := []Record{
+		{Date: "2026-11-26", T: "09:00:00", ValueUM: 10000, Ch: 1, Verdict: "合格"},
+		{Date: "2026-11-26", T: "09:00:01", ValueUM: 15000, Ch: 1, Verdict: "超差"},
+	}
+	meta := CSVMeta{LowerUM: 9000, UpperUM: 11000}
+	xls := RecordsToXls(recs, meta)
+
+	// Style definition must exist and be one point larger than the default 10.
+	if !strings.Contains(xls, "ss:ID=\"sValue\"") {
+		t.Fatal("missing sValue style definition")
+	}
+	if !strings.Contains(xls, "<Font ss:Size=\"11\"/>") {
+		t.Errorf("sValue font size = ? want 11 (default 10 + 1):\n%s", xls)
+	}
+
+	rows := strings.Split(xls, "<Row>")
+	for ri := 2; ri < len(rows); ri++ {
+		cells := strings.Split(rows[ri], "<Cell")
+		if len(cells)-1 != len(CSVHeadersCN) {
+			t.Fatalf("row %d cells = %d, want %d", ri, len(cells)-1, len(CSVHeadersCN))
+		}
+		// 第 4 个单元格 (cells[4]) = 测量值，必须带 sValue。
+		if !strings.Contains(cells[4], "ss:StyleID=\"sValue\"") {
+			t.Errorf("row %d 测量值 cell missing sValue: %q", ri, cells[4])
+		}
+		// 判定颜色样式还在最后一列，未被放大样式取代。
+		last := cells[len(cells)-1]
+		wantStyle := "sPass"
+		if recs[ri-2].Verdict == "超差" {
+			wantStyle = "sFail"
+		}
+		if !strings.Contains(last, "ss:StyleID=\""+wantStyle+"\"") {
+			t.Errorf("row %d verdict cell lost style %s: %q", ri, wantStyle, last)
+		}
+	}
+
+	// CSV export must stay plain text with no Excel style markup.
+	csv := RecordsToCsv(recs, meta)
+	if strings.Contains(csv, "StyleID") || strings.Contains(csv, "sValue") {
+		t.Errorf("CSV export must not carry Excel styles:\n%s", csv)
 	}
 }
 

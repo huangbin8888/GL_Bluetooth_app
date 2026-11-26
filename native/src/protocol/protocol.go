@@ -55,7 +55,11 @@ var (
 	partialRe   = regexp.MustCompile(`(^|[^A-Za-z0-9])(D|DA|DAT|DAT0|DAT1|DAT0:|DAT1:)$`)
 	datHeadRe   = regexp.MustCompile(`DAT[01]:`)
 	namSuffixRe = regexp.MustCompile(`^[A-Za-z0-9_-]+$`)
-	hidTokenRe  = regexp.MustCompile(`\A([+-]?)(\d+(\.\d+)?)\s*(mm|inch|in|m|i)?\z`)
+	hidTokenRe  = regexp.MustCompile(`\A([+-]?)(\d+([.,]\d+)?)\s*(mm|inch|in|m|i)?\z`)
+	// Loose fallback for calipers that wrap the value in status text/brackets
+	// or use a comma decimal separator. Strict match above is tried first.
+	hidLooseNumRe  = regexp.MustCompile(`([+-]?\d+(?:[.,]\d+)?)`)
+	hidLooseInchRe = regexp.MustCompile(`(?i)(inch|\bin\b|\bi\b|")`)
 )
 
 // ---------- core value types ----------
@@ -736,6 +740,8 @@ func RecordsToXls(recs []Record, meta CSVMeta) string {
 	b.WriteString(" <Styles>\r\n")
 	b.WriteString("  <Style ss:ID=\"sPass\"><Interior ss:Color=\"#C6EFCE\" ss:Pattern=\"Solid\"/><Font ss:Color=\"#006100\"/></Style>\r\n")
 	b.WriteString("  <Style ss:ID=\"sFail\"><Interior ss:Color=\"#FFC7CE\" ss:Pattern=\"Solid\"/><Font ss:Color=\"#9C0006\"/></Style>\r\n")
+	// 测量值列单独放大一号，便于在一行里快速定位数值；不改颜色/列宽。
+	b.WriteString("  <Style ss:ID=\"sValue\"><Font ss:Size=\"11\"/></Style>\r\n")
 	b.WriteString(" </Styles>\r\n")
 	b.WriteString(" <Worksheet ss:Name=\"记录\">\r\n")
 	b.WriteString("  <Table>\r\n")
@@ -755,7 +761,10 @@ func RecordsToXls(recs []Record, meta CSVMeta) string {
 		b.WriteString("   <Row>\r\n")
 		for j, v := range cells {
 			style := ""
-			if j == len(cells)-1 {
+			if j == 3 {
+				// 测量值（CSVHeadersCN[3]）：放大一号，其他列维持默认。
+				style = " ss:StyleID=\"sValue\""
+			} else if j == len(cells)-1 {
 				switch v {
 				case "合格":
 					style = " ss:StyleID=\"sPass\""
@@ -828,22 +837,46 @@ func HidSplit(text, terminator string) []string {
 }
 
 // HidToFrame turns one HID token into the same DAT0 frame the BLE chain uses.
-// Returns "" when the token is not a valid measurement.
+// Tries the strict numeric-token match first; if that fails (caliper prefixes
+// status text, wraps the value in brackets, uses a comma decimal, etc.) it
+// falls back to extracting the first number and guessing the unit from the
+// token. Returns "" only when no numeric value can be found at all.
 func HidToFrame(token string) string {
-	m := hidTokenRe.FindStringSubmatch(strings.TrimSpace(token))
-	if m == nil {
+	s := strings.TrimSpace(token)
+	if s == "" {
 		return ""
 	}
-	unit := "m"
-	u := strings.ToLower(m[4])
-	if u == "i" || u == "inch" || u == "in" {
-		unit = "i"
+	var num, unit, sign string
+	if m := hidTokenRe.FindStringSubmatch(s); m != nil {
+		sign = m[1] // strict path keeps the sign in its own group
+		num = m[2]
+		u := strings.ToLower(m[4])
+		unit = "m"
+		if u == "i" || u == "inch" || u == "in" {
+			unit = "i"
+		}
+	} else {
+		nm := hidLooseNumRe.FindStringSubmatch(s)
+		if nm == nil {
+			return ""
+		}
+		num = nm[1] // loose path embeds an optional sign in the number
+		unit = "m"
+		if hidLooseInchRe.MatchString(s) {
+			unit = "i"
+		}
 	}
-	sign := "+"
-	if m[1] == "-" {
-		sign = "-"
+	num = strings.ReplaceAll(num, ",", ".")
+	if sign == "" {
+		if strings.HasPrefix(num, "-") {
+			sign = "-"
+			num = strings.TrimPrefix(num, "-")
+		} else {
+			sign = "+"
+			num = strings.TrimPrefix(num, "+")
+		}
 	}
-	return "DAT0:" + unit + sign + m[2]
+	return "DAT0:" + unit + sign + num
 }
 
 // ---------- time / filenames ----------

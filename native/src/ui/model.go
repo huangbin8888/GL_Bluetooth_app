@@ -222,8 +222,10 @@ func (m *RecordModel) Value(row, col int) interface{} {
 		}
 		return fmt.Sprintf("%.*f", m.digits, protocol.ToMM(r.ValueUM))
 	case 4:
-		// RawUnit is the protocol token ("m"|"i"); always show a friendly label.
-		return protocol.FriendlyUnit(r.RawUnit)
+		// The 单位 column labels the CONVERTED value in col 3, so it must
+		// follow the display setting. RawUnit is only the caliper's wire
+		// token; showing it here used to yield "10.00" (mm) + "inch".
+		return unitSuffix(m.unit)
 	case 5:
 		return r.Verdict
 	}
